@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    @apply bg-ink-950 text-paper font-sans antialiased;
+  }
+  /* Tabular figures everywhere money or hashes appear, so columns align. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: theme('colors.ink.900'); }
+  ::-webkit-scrollbar-thumb {
+    background: theme('colors.ink.700');
+    border-radius: 6px;
+    border: 2px solid theme('colors.ink.900');
+  }
+  ::-webkit-scrollbar-thumb:hover { background: theme('colors.ink.600'); }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-ink-700 bg-ink-900;
+  }
+  .panel-head {
+    @apply flex items-center justify-between gap-3 border-b border-ink-700 px-4 py-3;
+  }
+  .label {
+    @apply text-2xs font-medium uppercase tracking-[0.14em] text-paper-faint;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-2xs font-medium;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-paypal text-white hover:bg-paypal-bright;
+  }
+  .btn-ghost {
+    @apply btn border border-ink-600 text-paper-dim hover:border-ink-500 hover:text-paper;
+  }
+  .field {
+    @apply w-full rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-paper
+           placeholder:text-paper-faint focus:border-paypal focus:outline-none;
+  }
+  .rule { @apply h-px w-full bg-ink-700; }
+}
+
+@layer utilities {
+  .grain {
+    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.028) 1px, transparent 0);
+    background-size: 3px 3px;
+  }
+  @keyframes pact-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  .live-dot { animation: pact-pulse 1.6s ease-in-out infinite; }
+  @keyframes pact-slide {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  .enter { animation: pact-slide 0.22s ease-out both; }
+}
+
+/* AG Grid: align the table with the rest of the interface rather than letting
+   the library's default theme clash with it. */
+.ag-theme-quartz-dark {
+  --ag-background-color: transparent;
+  --ag-odd-row-background-color: transparent;
+  --ag-header-background-color: transparent;
+  --ag-border-color: theme('colors.ink.700');
+  --ag-row-border-color: theme('colors.ink.800');
+  --ag-foreground-color: theme('colors.paper.DEFAULT');
+  --ag-secondary-foreground-color: theme('colors.paper.faint');
+  --ag-header-foreground-color: theme('colors.paper.faint');
+  --ag-font-family: theme('fontFamily.sans');
+  --ag-font-size: 12.5px;
+  --ag-row-hover-color: theme('colors.ink.850');
+  --ag-selected-row-background-color: theme('colors.ink.800');
+  --ag-cell-horizontal-padding: 14px;
+  --ag-grid-size: 5px;
+}
+.ag-theme-quartz-dark .ag-header-cell-text {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.ag-theme-quartz-dark .ag-root-wrapper { border: none; }

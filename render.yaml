@@ -1,0 +1,34 @@
+# One service serves both the API and the built UI, so the hosted demo is a
+# single URL that a judge can open and use immediately.
+services:
+  - type: web
+    name: pact
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: pact-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_ENVIRONMENT
+        value: sandbox
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini
+      - key: PACT_DATA_DIR
+        value: /data
+      - key: PACT_CURRENCY
+        value: USD
+      # Left true so the demo still works if a visitor has no credentials of
+      # their own. Set to false to require real PayPal settlement.
+      - key: PACT_ALLOW_MOCK_PAYPAL
+        value: "true"

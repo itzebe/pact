@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Runtime state: job records and the reputation ledger are generated data,
+# not source. Judges should start from an empty ledger.
+data/
+*.tmp
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Secrets — never commit real credentials
+.env
+.env.local
+*.log
+
+# Agent working state — not part of the project
+.openhands/
