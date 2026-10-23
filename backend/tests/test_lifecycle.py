@@ -56,6 +56,21 @@ def test_negotiation_produces_a_multi_round_dialogue(engine):
     assert roles == {"buyer", "seller"}
 
 
+def test_no_deal_is_struck_when_the_ceiling_is_below_every_seller_floor(engine):
+    """A budget too small for any supplier must move no money at all.
+
+    Sellers have an absolute cost floor, so a ceiling beneath it is genuinely
+    unreachable rather than being quietly discounted to fit.
+    """
+    result = engine.run(make_job(engine, budget="20"))
+    assert result.status is JobStatus.FAILED
+    assert result.seller_id is None
+    assert result.agreed_price is None
+    assert result.escrow.state is EscrowState.NONE
+    assert result.escrow.authorization_id == ""
+    assert any(e.kind == "negotiation_failed" for e in result.ledger)
+
+
 def test_every_seller_gets_to_quote(engine):
     job = make_job(engine)
     result = engine.run(job)

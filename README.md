@@ -187,6 +187,25 @@ Interactive docs at `http://localhost:8000/docs`.
 - The verifier's deterministic checks and model judgement are combined with AND, so a persuasive-but-empty delivery cannot pass. See `EVASION_MARKERS` in `core/settlement.py`.
 - Reputation is smoothed toward 0.5 for thin histories, so a new agent is not treated as proven and one lucky settlement does not outrank a consistent record.
 
+### Troubleshooting
+
+**`npm run build` fails complaining about esbuild's binary.** Very recent npm versions (11.21+) block
+package install scripts by default. Vite needs esbuild's binary, so approve it once:
+
+```bash
+npm install-scripts approve esbuild
+```
+
+On npm 10 and earlier this does not occur — install scripts run by default.
+
+**Settlement completes but the UI badge says "Simulated PayPal".** No credentials were found, so the
+escrow ran against the in-memory double. Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` in `.env` and
+restart the backend. The badge is the authoritative indicator of which path ran — a simulated settlement
+is always labelled as such.
+
+**Agents quote identical prices and never negotiate.** Without `LLM_API_KEY` the deterministic fallback
+engine is in use, which is intentionally predictable. Set a key to get genuine model-driven bargaining.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

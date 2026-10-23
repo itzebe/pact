@@ -300,11 +300,17 @@ def _seller_profile(seller_id: str, ceiling: Decimal) -> dict[str, Any]:
 
     Derived from the id so it is stable across runs, which keeps the demo
     reproducible while still producing three different prices.
+
+    Each seller also has an absolute minimum: a real supplier does not discount
+    below its own cost just because the buyer's budget is small. That is what
+    makes the budget ceiling a real constraint rather than a suggestion — if the
+    ceiling is below every seller's floor, no deal is reachable and no money
+    moves.
     """
     profiles = {
-        "seller_atlas": {"markup": Decimal("1.02"), "floor_ratio": Decimal("0.72"), "eta": "under 2 minutes", "confidence": 0.82},
-        "seller_nova": {"markup": Decimal("0.94"), "floor_ratio": Decimal("0.68"), "eta": "about 1 minute", "confidence": 0.88},
-        "seller_quill": {"markup": Decimal("0.88"), "floor_ratio": Decimal("0.55"), "eta": "immediate", "confidence": 0.95},
+        "seller_atlas": {"markup": Decimal("1.02"), "floor_ratio": Decimal("0.72"), "min_cost": Decimal("85"), "eta": "under 2 minutes", "confidence": 0.82},
+        "seller_nova": {"markup": Decimal("0.94"), "floor_ratio": Decimal("0.68"), "min_cost": Decimal("70"), "eta": "about 1 minute", "confidence": 0.88},
+        "seller_quill": {"markup": Decimal("0.88"), "floor_ratio": Decimal("0.55"), "min_cost": Decimal("55"), "eta": "immediate", "confidence": 0.95},
     }
     chosen = profiles.get(seller_id)
     if chosen is None:
@@ -313,12 +319,14 @@ def _seller_profile(seller_id: str, ceiling: Decimal) -> dict[str, Any]:
         chosen = {
             "markup": Decimal("1.0") + spread,
             "floor_ratio": Decimal("0.65") + spread,
+            "min_cost": Decimal("65"),
             "eta": "about 2 minutes",
             "confidence": 0.75,
         }
+    floor = max((ceiling * chosen["floor_ratio"]).quantize(Decimal("0.01")), chosen["min_cost"])
     return {
         "markup": chosen["markup"],
-        "floor": (ceiling * chosen["floor_ratio"]).quantize(Decimal("0.01")),
+        "floor": floor,
         "eta": chosen["eta"],
         "confidence": chosen["confidence"],
     }
