@@ -1,0 +1,18 @@
+# Vercel's Python runtime detects a root project here and installs from
+# uv.lock. Keep this in sync with requirements.txt and backend/pyproject.toml.
+#
+# psycopg is included because Vercel has no durable disk, so the ledger must live
+# in an external Postgres (set DATABASE_URL). Without it the app still runs, but
+# only with non-durable storage.
+[project]
+name = "pact"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+    "sse-starlette>=2.1",
+    "psycopg[binary]>=3.2",
+]

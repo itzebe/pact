@@ -24,6 +24,7 @@ export const api = {
   runJob: (id, sellerIds) =>
     req(`/api/jobs/${id}/run${sellerIds?.length ? `?seller_ids=${sellerIds.join(',')}` : ''}`, { method: 'POST' }),
   approveJob: (id) => req(`/api/jobs/${id}/approve`, { method: 'POST' }),
+  reconcileJob: (id) => req(`/api/jobs/${id}/reconcile`, { method: 'POST' }),
   ledger: (id) => req(`/api/jobs/${id}/ledger`),
   reputation: () => req('/api/reputation'),
   globalLedger: () => req('/api/ledger'),

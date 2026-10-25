@@ -413,6 +413,26 @@ def _parse_authorization(body: dict) -> Authorization:
     )
 
 
+def _parse_capture(body: dict) -> Capture:
+    """Read the first capture PayPal attached to an order or authorization.
+
+    Used to recover a capture whose id was lost with a failed response: the order
+    is authoritative about what was captured against it.
+    """
+    unit = (body.get("purchase_units") or [{}])[0]
+    payments = unit.get("payments") or {}
+    captures = payments.get("captures") or []
+    node = captures[0] if captures else body
+    amount = node.get("amount") or {}
+    return Capture(
+        id=node.get("id", ""),
+        status=node.get("status", ""),
+        amount=str(amount.get("value", "")),
+        currency=str(amount.get("currency_code", "")),
+        raw=body,
+    )
+
+
 def approval_url(order: dict) -> str | None:
     """Return the buyer-approval URL from a created order's HATEOAS links.
 

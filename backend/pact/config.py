@@ -57,7 +57,14 @@ class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
     currency: str = field(default_factory=lambda: os.getenv("PACT_CURRENCY", "USD"))
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("PACT_DATA_DIR", str(ROOT / "data"))))
+    # Postgres is used when set. Serverless platforms have no durable disk, so a
+    # connection string is the only way the ledger survives there.
+    database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
     allow_mock_paypal: bool = field(default_factory=lambda: _bool("PACT_ALLOW_MOCK_PAYPAL", True))
+    # Refuse to start rather than settle against the in-memory double. Set this on
+    # any deployment where a settlement is meant to be real: a mock "settlement"
+    # moves no money, so reporting one as settled would be a lie about payment.
+    require_real_paypal: bool = field(default_factory=lambda: _bool("PACT_REQUIRE_REAL_PAYPAL", False))
     sellers: str = field(default_factory=lambda: os.getenv("PACT_SELLERS", "seller_atlas,seller_nova,seller_quill"))
     cors_origins: list[str] = field(
         default_factory=lambda: [

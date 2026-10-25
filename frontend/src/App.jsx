@@ -130,6 +130,22 @@ export default function App() {
     }
   }, [job, refreshLists])
 
+  const reconcile = useCallback(async () => {
+    if (!job) return
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await api.reconcileJob(job.id)
+      setJob(updated)
+      setLiveEntries(updated.ledger ?? [])
+      await refreshLists()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }, [job, refreshLists])
+
   const viewJob = useMemo(
     () => (job ? { ...job, ledger: liveEntries.length ? liveEntries : job.ledger } : null),
     [job, liveEntries],
@@ -183,6 +199,13 @@ export default function App() {
               PayPal did not confirm a terminal outcome, so Pact has recorded neither a release nor
               a return. This needs reconciliation rather than a retry — a retry could capture twice.
             </div>
+            <button
+              disabled={busy}
+              onClick={reconcile}
+              className="chip mt-3 ring-1 bg-paypal-deep/50 text-paypal-bright ring-paypal/40 disabled:opacity-50"
+            >
+              {busy ? 'Reconciling…' : 'Reconcile with PayPal'}
+            </button>
           </div>
         )}
 

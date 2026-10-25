@@ -48,7 +48,7 @@ class PactEngine:
         self.reputation = reputation_ledger or reputation
         self.negotiation = NegotiationEngine(self.llm, max_rounds=max_rounds)
         self.verifier = Verifier(self.llm)
-        self.settlement = SettlementEngine(self.escrow, self.reputation)
+        self.settlement = SettlementEngine(self.escrow, self.reputation, store=self.store)
 
     # ------------------------------------------------------------- helpers
 
@@ -89,6 +89,14 @@ class PactEngine:
         if job.status not in {JobStatus.OPEN, JobStatus.FAILED}:
             raise JobAlreadyRunning(
                 f"Job {job.id} is {job.status.value}; refusing to run it again"
+            )
+
+        # Claim the job atomically. The check above reads this process's copy; the
+        # claim is what actually decides the transition, so two instances that both
+        # read "open" cannot both proceed.
+        if not self.store.claim_run(job):
+            raise JobAlreadyRunning(
+                f"Job {job.id} was claimed by another run; refusing to run it again"
             )
 
         seller_ids = seller_ids or default_seller_ids()
@@ -249,6 +257,15 @@ class PactEngine:
         if job.escrow.state != EscrowState.HELD or job.delivery is None:
             return job
         return self.settle_delivery(job)
+
+    def reconcile_job(self, job: Job) -> Job:
+        """Resolve a job whose settlement outcome was never determined.
+
+        Only reads PayPal to establish what actually happened, so it is safe to
+        call repeatedly. The job stays UNRESOLVED if the outcome still cannot be
+        established, rather than being guessed either way.
+        """
+        return self.settlement.reconcile(job)
 
 
 engine = PactEngine()

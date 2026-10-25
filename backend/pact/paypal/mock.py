@@ -88,6 +88,9 @@ class MockPayPalEscrowClient:
         self._authorizations[authorization_id] = record
         order["status"] = "COMPLETED"
         order["authorization_id"] = authorization_id
+        # PayPal attaches the authorization to the order's purchase unit, and that
+        # is where it must be found when a response was lost.
+        unit["payments"] = {"authorizations": [record]}
 
         return Authorization(
             id=authorization_id,
@@ -125,6 +128,10 @@ class MockPayPalEscrowClient:
         self._captures[capture_id] = capture
         record["status"] = "CAPTURED"
         record["capture_id"] = capture_id
+        order = self._orders.get(record.get("order_id", ""))
+        if order is not None:
+            payments = order["purchase_units"][0].setdefault("payments", {})
+            payments["captures"] = [capture]
 
         return Capture(id=capture_id, status="COMPLETED", amount=captured_amount,
                        currency=capture["amount"]["currency_code"], raw=capture)

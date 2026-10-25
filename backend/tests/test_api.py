@@ -211,3 +211,66 @@ def test_an_ordinary_invalid_budget_is_still_rejected(client):
             headers={"Content-Type": "application/json"},
         )
         assert response.status_code == 422, f"{value} -> {response.status_code}"
+
+
+def test_reconcile_is_refused_for_a_job_that_is_not_unresolved(client):
+    """The endpoint must not be usable to re-run an ordinary settlement."""
+    job_id = create(client)
+    assert client.post(f"/api/jobs/{job_id}/run").status_code == 200
+
+    response = client.post(f"/api/jobs/{job_id}/reconcile")
+    assert response.status_code == 409, response.text
+    assert "unresolved" in response.json()["detail"]
+
+
+def test_reconcile_resolves_a_job_whose_capture_outcome_was_lost(client):
+    """End to end through HTTP: an ambiguous capture is resolved by asking PayPal."""
+    from decimal import Decimal
+
+    from pact.api import routes
+    from pact.paypal import AmbiguousOutcome
+
+    engine = routes.engine
+    escrow = engine.escrow
+
+    # A job holding funds, ready to settle. Built through the engine so the test
+    # exercises the reconcile endpoint rather than the verification heuristic.
+    job = engine.create_job(title="Reconcile", brief="b", criteria=["c"],
+                            budget_max=Decimal("100"))
+    job.seller_id = "seller_nova"
+    job.agreed_price = Decimal("50.00")
+    engine.settlement.hold(job)
+    engine.store.save(job)
+
+    original = escrow.capture_authorization
+
+    def apply_then_lose(authorization_id, **kwargs):
+        capture = original(authorization_id, **kwargs)
+        raise AmbiguousOutcome(f"capture {capture.id} applied, response lost", code="TIMEOUT")
+
+    escrow.capture_authorization = apply_then_lose
+    try:
+        engine.settlement.release(job)
+    except AmbiguousOutcome:
+        pass
+    finally:
+        escrow.capture_authorization = original
+
+    unresolved = client.get(f"/api/jobs/{job.id}").json()
+    assert unresolved["status"] == "unresolved", unresolved
+    assert unresolved["escrow"]["capture_id"] == "pending"
+
+    reconciled = client.post(f"/api/jobs/{job.id}/reconcile")
+    assert reconciled.status_code == 200, reconciled.text
+    result = reconciled.json()
+    assert result["status"] == "settled", result
+    assert result["escrow"]["capture_status"] == "COMPLETED"
+    assert result["escrow"]["capture_id"].startswith("MOCK-CAPTURE-")
+
+
+def test_health_reports_storage_backend(client):
+    body = client.get("/api/health").json()
+    assert body["storage"]["backend"] == "filesystem"
+    assert "durable" in body["storage"]
+    assert body["paypal"]["mode"] == "mock"
+    assert "require_real" in body["paypal"]

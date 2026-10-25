@@ -43,6 +43,7 @@ These are the guarantees that protect real money, and each is covered by a test:
 - **Settled means paid.** A job is recorded as settled only when the capture status is `COMPLETED`. `PENDING`, `FAILED` and `DECLINED` are not settlement.
 - **Captured at most once.** Settlement is serialised behind a lock and claims the authorization before the call, so concurrent requests cannot produce a duplicate capture. A second attempt is refused.
 - **An unknown outcome is not a failure.** A timeout, a dropped connection, or a 5xx leaves the job `unresolved` and asks a human to reconcile. It is never retried automatically, because a blind retry is how double-charges happen.
+- **Reconciliation asks PayPal, it does not guess.** `POST /api/jobs/{id}/reconcile` reads the authorization (and the order, if the authorize itself was lost) to establish what actually happened. `CAPTURED` settles the job using the real capture id recovered from PayPal and credits the seller (reversing the failure recorded while the outcome was unknown); an intact hold clears the in-flight marker so the job is retryable; an unreachable PayPal leaves the job `unresolved` and blocked, because an outage is not evidence that no money moved.
 - **A void is confirmed.** After voiding, Pact re-reads the authorization and records whether PayPal confirmed it.
 - **No capture without a passing verdict.** A failed or inconclusive verification never reaches the capture call.
 
@@ -96,7 +97,7 @@ Pact is designed so a reviewer can clone it and see the complete lifecycle with 
 
 Both fallbacks are deliberately loud. A simulated settlement must never be confused with a real one.
 
-To require real credentials and refuse the mock path, set `PACT_ALLOW_MOCK_PAYPAL=false`.
+To require real credentials and refuse the mock path, set `PACT_ALLOW_MOCK_PAYPAL=false`. To make missing credentials a hard startup failure on a deployment where settlement must be real, set `PACT_REQUIRE_REAL_PAYPAL=true` — otherwise a production deploy with no credentials would settle against the in-memory double and report a `settled` job for which no money ever moved.
 
 ---
 
@@ -186,6 +187,8 @@ This is what makes the output defensible as a financial record rather than an ap
 | `GET` | `/api/health` | Configuration and settlement mode |
 | `POST` | `/api/jobs` | Post a job |
 | `POST` | `/api/jobs/{id}/run` | Run the full lifecycle |
+| `POST` | `/api/jobs/{id}/approve` | Continue after the buyer approves the PayPal order |
+| `POST` | `/api/jobs/{id}/reconcile` | Resolve an `unresolved` job by reading PayPal |
 | `GET` | `/api/jobs/{id}` | Full job state |
 | `GET` | `/api/jobs/{id}/ledger` | Audit trail + chain validity |
 | `GET` | `/api/jobs/{id}/stream` | Server-sent events, live |
@@ -193,6 +196,52 @@ This is what makes the output defensible as a financial record rather than an ap
 | `GET` | `/api/ledger` | Every settlement decision, newest first |
 
 Interactive docs at `http://localhost:8000/docs`.
+
+---
+
+## Deploying to Vercel
+
+Vercel Functions have a read-only filesystem with ephemeral `/tmp`, and several
+instances may serve the same job. Two things follow, and both are handled:
+
+- **Persistence must be external.** Set `DATABASE_URL` to a Postgres URL
+  (Vercel Postgres, Neon, Supabase, and so on). Jobs and the reputation ledger
+  then live in the database. Without it the app still runs, but `/api/health`
+  reports `"durable": false` and the ledger is lost on cold start.
+- **Settlement must be instance-safe.** On Postgres the store takes a session
+  advisory lock per job and re-reads the authoritative row inside it, so two
+  instances cannot both capture the same authorization. The filesystem store
+  cannot do this; its `threading.RLock` only protects one process.
+
+The repository is already configured — `vercel.json` builds the frontend and
+routes `/api/*` to the FastAPI function in `api/index.py`.
+
+1. Import the repository at [vercel.com/new](https://vercel.com/new). Leave the
+   framework preset as **Other**; `vercel.json` supplies the commands.
+2. Create a Postgres database and add its pooled connection string as the
+   `DATABASE_URL` environment variable for Production, Preview, and Development.
+3. Add `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` (sandbox) and, optionally,
+   `LLM_API_KEY` and `LLM_MODEL`. Without PayPal credentials the escrow runs
+   against the in-memory double and the UI labels it "Simulated PayPal".
+4. Deploy, then confirm the wiring:
+
+```bash
+curl -s https://<your-deployment>/api/health | jq '{paypal: .paypal.mode, storage}'
+```
+
+`storage.backend` should read `postgres` and `storage.durable` should be `true`.
+The tables are created on first use, so no migration step is needed.
+
+### Verifying the serverless path locally
+
+The Postgres tests are skipped unless a database is reachable, so the default
+suite stays dependency-free. Point them at a database to exercise durability,
+the read-only-filesystem path, and the cross-process capture race:
+
+```bash
+createdb pact
+DATABASE_URL=postgresql://localhost/pact pytest tests/test_postgres_store.py -v
+```
 
 ---
 

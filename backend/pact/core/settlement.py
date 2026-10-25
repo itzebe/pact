@@ -20,10 +20,18 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from contextlib import contextmanager
 from decimal import Decimal
+from typing import Iterator
 
 from ..paypal import EscrowBackend, PayPalError
-from ..paypal.escrow import HOLDABLE_STATUSES, SETTLED_CAPTURE_STATUSES, approval_url
+from ..paypal.escrow import (
+    HOLDABLE_STATUSES,
+    SETTLED_CAPTURE_STATUSES,
+    _parse_authorization,
+    _parse_capture,
+    approval_url,
+)
 from .llm import LLM, LLMError
 from .models import (
     CriterionResult,
@@ -189,13 +197,50 @@ class SettlementEngine:
        because a duplicate capture is the one failure that costs real money.
     """
 
-    def __init__(self, escrow: EscrowBackend, reputation: ReputationLedger) -> None:
+    def __init__(self, escrow: EscrowBackend, reputation: ReputationLedger,
+                 store: object | None = None) -> None:
         self.escrow = escrow
         self.reputation = reputation
+        self.store = store
         # Guards the transition into a terminal settlement state. Without it, two
         # concurrent release/refund calls can both pass the state check and both
         # reach the provider, which is how a duplicate capture happens.
         self._settle_lock = threading.RLock()
+
+    @contextmanager
+    def _guard(self, job: Job) -> Iterator[None]:
+        """Serialise settlement for one job, across processes as well as threads.
+
+        ``_settle_lock`` only protects a single process. On a platform that runs
+        several instances, two of them can hold the same job and both capture. When
+        the store can take a shared claim (Postgres), hold it and adopt the stored
+        escrow state, so an attempt that already moved money is visible here as a
+        recorded capture rather than an open authorization.
+        """
+        store = self.store
+        if store is not None and getattr(store, "supports_claims", False):
+            with store.settlement_claim(job) as fresh:
+                if fresh is not None:
+                    # Adopt the authoritative escrow record. A capture recorded by
+                    # another instance then trips the "already captured" check below.
+                    job.escrow = fresh.escrow
+                    job.status = fresh.status
+                with self._settle_lock:
+                    yield
+            return
+        with self._settle_lock:
+            yield
+
+    def _persist(self, job: Job) -> None:
+        """Push the current escrow state to the shared store, if there is one.
+
+        On the DB path this is what makes a claim visible to other instances. The
+        in-memory ``capture_id = "pending"`` marker is meaningless to a process that
+        never saw it, so it has to be written before the provider is called.
+        """
+        store = self.store
+        if store is not None and getattr(store, "supports_claims", False):
+            store.save(job)
 
     @property
     def mode(self) -> str:
@@ -350,10 +395,11 @@ class SettlementEngine:
     def release(self, job: Job, note: str = "") -> Job:
         """Capture the held funds because the delivery passed verification.
 
-        The whole transition is serialised on ``_settle_lock`` so a second
-        concurrent attempt cannot slip past the state check and capture twice.
+        The whole transition is serialised on the settlement guard so a second
+        concurrent attempt — in another thread or another instance — cannot slip
+        past the state check and capture twice.
         """
-        with self._settle_lock:
+        with self._guard(job):
             if job.escrow.state != EscrowState.HELD:
                 raise ValueError(f"Cannot release escrow in state {job.escrow.state}")
             if not job.escrow.authorization_id:
@@ -365,6 +411,9 @@ class SettlementEngine:
             # Claim the authorization before calling out, so a racing attempt sees
             # an in-progress capture rather than an open one.
             job.escrow.capture_id = "pending"
+            # Write the claim before the call, so a second instance that takes the
+            # lock next sees a capture in progress instead of an open authorization.
+            self._persist(job)
             try:
                 capture = self.escrow.capture_authorization(
                     job.escrow.authorization_id,
@@ -374,11 +423,24 @@ class SettlementEngine:
                     idempotency_key=f"pact-capture-{job.id}",
                 )
             except PayPalError as exc:
-                job.escrow.capture_id = ""
                 job.append("capture_failed", "paypal", f"Capture failed: {exc}",
                            authorization_id=job.escrow.authorization_id)
                 if getattr(exc, "ambiguous", False):
-                    self.mark_unresolved(job, f"Capture outcome unknown: {exc}")
+                    # The capture may have been applied before the response was lost.
+                    # Keep the "pending" marker so the in-flight fact survives, and
+                    # leave the job UNRESOLVED: a blind retry could capture twice, so
+                    # only an explicit reconciliation may move it on.
+                    self.mark_unresolved(
+                        job,
+                        f"Capture outcome unknown; reconciliation required before any "
+                        f"further capture attempt ({exc})",
+                    )
+                else:
+                    # Definite failure: no money moved, so withdraw the claim. Leaving
+                    # "pending" in the shared row would wedge the job permanently,
+                    # because every later attempt would see a capture that never was.
+                    job.escrow.capture_id = ""
+                    self._persist(job)
                 raise
 
             job.escrow.capture_id = capture.id
@@ -422,6 +484,7 @@ class SettlementEngine:
                     agent_id=job.seller_id,
                     score=self.reputation.score(record),
                 )
+            self._persist(job)
             return job
 
     def refund(self, job: Job, reason: str = "") -> Job:
@@ -430,7 +493,7 @@ class SettlementEngine:
         A void returns the buyer's funds and moves no money, so the job ends in
         ``VOIDED`` rather than ``REFUNDED`` — nothing was ever captured to refund.
         """
-        with self._settle_lock:
+        with self._guard(job):
             if job.escrow.state != EscrowState.HELD:
                 raise ValueError(f"Cannot void escrow in state {job.escrow.state}")
             if not job.escrow.authorization_id:
@@ -476,6 +539,7 @@ class SettlementEngine:
                     agent_id=job.seller_id,
                     score=self.reputation.score(record),
                 )
+            self._persist(job)
             return job
 
     def _confirm_void(self, authorization_id: str) -> bool:
@@ -487,8 +551,243 @@ class SettlementEngine:
             return False
         return str(current.status).upper() == "VOIDED"
 
+    # ------------------------------------------------------- reconciliation
+
+    def reconcile(self, job: Job) -> Job:
+        """Resolve a job whose capture outcome was never learned.
+
+        An ambiguous capture is the one case where PACT cannot tell, from its own
+        records, whether money moved. Guessing either way is unsafe: assuming
+        success can under-report a settlement, and assuming failure can capture a
+        second time. So the only honest resolution is to ask PayPal what it
+        actually did, using the identifiers PACT already holds.
+
+        The authorization is the authoritative source here, because a capture is
+        recorded against it. If PayPal reports the authorization as CAPTURED, the
+        money moved and the capture is fetched to record its real id and status.
+        If it is still CREATED, nothing moved and the hold is intact.
+
+        This is a *read*, and it never initiates a capture, so it is safe to call
+        repeatedly. If PayPal cannot be reached the job stays UNRESOLVED and
+        blocked — an unreachable provider is not evidence that no money moved.
+
+        Runs under the settlement guard so two instances cannot reconcile the same
+        job at once: the second adopts the first's resolution and refuses.
+        """
+        with self._guard(job):
+            return self._reconcile(job)
+
+    def _reconcile(self, job: Job) -> Job:
+        if job.escrow.state != EscrowState.UNRESOLVED:
+            raise ValueError(f"Job is not unresolved (escrow state {job.escrow.state})")
+
+        authorization_id = job.escrow.authorization_id
+        if not authorization_id:
+            # An authorize call can fail ambiguously too, leaving an order whose
+            # outcome we never learned. The order is then the only handle we hold.
+            if job.escrow.order_id:
+                return self._reconcile_via_order(job)
+            # Nothing was ever authorized, so no capture can have been applied.
+            return self._resolve(job, EscrowState.NONE, JobStatus.FAILED,
+                                 "No authorization existed, so no capture could have been applied")
+
+        try:
+            authorization = self.escrow.get_authorization(authorization_id)
+        except PayPalError as exc:
+            job.append(
+                "reconciliation_unavailable",
+                "paypal",
+                f"Could not read authorization {authorization_id} to reconcile: {exc}",
+                authorization_id=authorization_id,
+                reason=str(exc),
+            )
+            self._persist(job)
+            return job
+
+        status = str(authorization.status).upper()
+
+        if status in {"CAPTURED", "PARTIALLY_CAPTURED"}:
+            return self._resolve_captured(job, authorization_id, status)
+
+        if status in HOLDABLE_STATUSES:
+            # PayPal still shows an open hold, so the capture did not land. The
+            # money never moved, so the in-flight marker is withdrawn and the job
+            # can be settled normally again.
+            self._clear_claim(job)
+            return self._resolve(job, EscrowState.HELD, JobStatus.ESCROWED,
+                                 f"PayPal reports authorization {authorization_id} as {status}; "
+                                 f"no capture was applied and the hold is intact")
+
+        if status == "VOIDED":
+            self._clear_claim(job)
+            return self._resolve(job, EscrowState.VOIDED, JobStatus.VOIDED,
+                                 f"PayPal reports authorization {authorization_id} as VOIDED; "
+                                 f"no money moved")
+
+        # DENIED or any unknown state: leave it unresolved rather than guess.
+        job.append(
+            "reconciliation_inconclusive",
+            "paypal",
+            f"PayPal reports authorization {authorization_id} as {status}; "
+            f"outcome still cannot be determined safely",
+            authorization_id=authorization_id,
+            status=status,
+        )
+        self._persist(job)
+        return job
+
+    def _reconcile_via_order(self, job: Job) -> Job:
+        """Resolve an ambiguous *authorize* by asking the order what it holds.
+
+        If the authorize landed, PayPal attaches the authorization to the order's
+        purchase unit, so the order is authoritative about whether a hold exists.
+        """
+        order_id = job.escrow.order_id
+        try:
+            order = self.escrow.get_order(order_id)
+        except PayPalError as exc:
+            job.append(
+                "reconciliation_unavailable",
+                "paypal",
+                f"Could not read order {order_id} to reconcile: {exc}",
+                order_id=order_id,
+                reason=str(exc),
+            )
+            self._persist(job)
+            return job
+
+        authorization = _parse_authorization(order if isinstance(order, dict) else {})
+        if not authorization.id:
+            # No authorization on the order: the hold never landed.
+            self._clear_claim(job)
+            return self._resolve(job, EscrowState.NONE, JobStatus.FAILED,
+                                 f"PayPal order {order_id} holds no authorization; no funds were held")
+
+        job.escrow.authorization_id = authorization.id
+        job.escrow.authorization_status = authorization.status
+        status = str(authorization.status).upper()
+
+        if status in HOLDABLE_STATUSES:
+            return self._resolve(job, EscrowState.HELD, JobStatus.ESCROWED,
+                                 f"Reconciled: order {order_id} holds authorization "
+                                 f"{authorization.id} ({status})")
+        if status in {"CAPTURED", "PARTIALLY_CAPTURED"}:
+            return self._resolve_captured(job, authorization.id, status)
+
+        self._clear_claim(job)
+        return self._resolve(job, EscrowState.NONE, JobStatus.FAILED,
+                             f"Authorization {authorization.id} on order {order_id} is {status}; "
+                             f"no funds are held")
+
+    def _find_capture_on_order(self, order_id: str) -> Any:
+        """Ask the order what was captured against it, for a lost capture id."""
+        try:
+            order = self.escrow.get_order(order_id)
+        except PayPalError as exc:
+            log.warning("Could not read order %s to recover a capture id: %s", order_id, exc)
+            return None
+        return _parse_capture(order if isinstance(order, dict) else {})
+
+    def _resolve_captured(self, job: Job, authorization_id: str, auth_status: str) -> Job:
+        """Record a capture that PayPal confirms happened.
+
+        The capture id is usually lost with the failed response, so it is recovered
+        from the order, which PayPal records captures against. Any id found this way
+        comes from PayPal itself rather than being invented.
+        """
+        capture_id = job.escrow.capture_id
+        status = ""
+        if capture_id and capture_id != "pending":
+            try:
+                status = str(self.escrow.get_capture(capture_id).status).upper()
+            except PayPalError as exc:
+                log.warning("Could not read capture %s: %s", capture_id, exc)
+
+        if not status and job.escrow.order_id:
+            found = self._find_capture_on_order(job.escrow.order_id)
+            if found is not None and found.id:
+                capture_id = found.id
+                status = str(found.status).upper()
+
+        if not status:
+            # No capture record could be read. The authorization status is still
+            # authoritative proof that money moved, so the fact is recorded without
+            # inventing a capture id we do not have.
+            job.escrow.capture_id = ""
+            job.escrow.capture_status = auth_status
+        else:
+            job.escrow.capture_id = capture_id
+            job.escrow.capture_status = status
+
+        if status and status not in SETTLED_CAPTURE_STATUSES:
+            return self._resolve(job, EscrowState.UNRESOLVED, JobStatus.UNRESOLVED,
+                                 f"Authorization {authorization_id} is captured but capture "
+                                 f"{capture_id} reports {status}; still unresolved")
+
+        resolved = self._resolve(
+            job, EscrowState.RELEASED, JobStatus.SETTLED,
+            f"Reconciled: PayPal confirms authorization {authorization_id} is {auth_status}",
+            reconciled=True,
+        )
+        if job.seller_id:
+            # The unknown outcome was recorded as a failure. It was not the
+            # seller's, so reverse it and credit the settlement, or reputation
+            # contradicts a ledger that now says the money moved.
+            record = self.reputation.record_reconciled(job.seller_id, float(job.escrow.amount))
+            job.append(
+                "reputation_updated",
+                "pact",
+                f"{job.seller_id} score now {self.reputation.score(record):.3f} "
+                f"({record['settled']} settled) after reconciliation",
+                agent_id=job.seller_id,
+                score=self.reputation.score(record),
+            )
+            self._persist(job)
+        return resolved
+
+    @staticmethod
+    def _clear_claim(job: Job) -> None:
+        """Withdraw an in-flight capture marker once we know no capture landed.
+
+        Leaving ``pending`` behind would make every later attempt refuse with
+        "already captured", which is the wedge this whole path exists to avoid.
+        """
+        if job.escrow.capture_id == "pending":
+            job.escrow.capture_id = ""
+            job.escrow.capture_status = ""
+
+    def _resolve(self, job: Job, state: EscrowState, status: JobStatus, summary: str,
+                 **detail: Any) -> Job:
+        """Move an unresolved job to a state that PayPal's own data supports."""
+        previous = job.escrow.state.value
+        job.escrow.state = state
+        job.status = status
+        job.append(
+            "settlement_reconciled",
+            "pact",
+            summary,
+            previous_state=previous,
+            resolved_state=state.value,
+            authorization_id=job.escrow.authorization_id,
+            capture_id=job.escrow.capture_id,
+            **detail,
+        )
+        self._persist(job)
+        return job
+
     def mark_unresolved(self, job: Job, reason: str) -> Job:
-        """Record an outcome we could not determine. Never a success, never a retry."""
+        """Record an outcome we could not determine. Never a success, never a retry.
+
+        The job stays in this state until :meth:`reconcile` establishes what PayPal
+        actually did. Nothing else may capture or void it.
+
+        Idempotent: both the settlement layer and the engine above it react to an
+        ambiguous error, and recording the same unknown outcome twice would append a
+        duplicate ledger entry and count the seller's failure twice.
+        """
+        if job.escrow.state == EscrowState.UNRESOLVED:
+            return job
+
         job.escrow.state = EscrowState.UNRESOLVED
         job.status = JobStatus.UNRESOLVED
         job.append(
@@ -502,4 +801,5 @@ class SettlementEngine:
         )
         if job.seller_id:
             self.reputation.record_failed(job.seller_id)
+        self._persist(job)
         return job
