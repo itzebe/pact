@@ -51,7 +51,7 @@ The second challenge was guardrails. Models will happily agree to a price above 
 - An agent market that visibly self-corrects through reputation, demonstrated end to end.
 - A tamper-evident audit trail a finance team could actually reconcile against.
 - Runs with zero setup: no PayPal account or API key needed to see the whole thing work, but real sandbox settlement the moment credentials are added.
-- 80 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app.
+- 82 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app.
 
 ## What we learned
 
@@ -76,7 +76,7 @@ The primitive already exists. The interesting work in agent commerce is not movi
 
 | Tool | How it was used |
 |---|---|
-| **PayPal Orders v2 API** | The settlement rail. `intent=AUTHORIZE` on order creation, `POST /v2/checkout/orders/{id}/authorize` to place the hold, `POST /v2/checkout/orders/{id}/capture` to release, `POST /v2/payments/authorizations/{id}/void` to return. Idempotent via `PayPal-Request-Id`. |
+| **PayPal Orders v2 API** | The settlement rail. `intent=AUTHORIZE` on order creation, `POST /v2/checkout/orders/{id}/authorize` to place the hold, `POST /v2/payments/authorizations/{id}/capture` to release, `POST /v2/payments/authorizations/{id}/void` to return. Idempotent via `PayPal-Request-Id`. |
 | **PayPal Sandbox** | The environment the demo runs against, so the money movement is real API traffic without real money. Sandbox credentials via `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`. |
 | **AG Grid** | The settlement ledger grid: sortable, resizable audit records with hash-chain status. |
 | **AI model (OpenAI-compatible)** | Three distinct agent roles — seller quoting, buyer countering, and independent verification of the deliverable. Any OpenAI-compatible provider works; the model and base URL are configuration, not hard-coded. |
