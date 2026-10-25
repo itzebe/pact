@@ -252,6 +252,139 @@ def test_base_url_follows_the_environment():
     assert "sandbox" not in PayPalEscrowClient(client_id="a", client_secret="b", environment="live").base_url
 
 
+# --------------------------------------------------------------- payment parsing
+#
+# An order and a Payments v2 authorization/capture are different resources that
+# both carry `id` and `status`. `_parse_authorization`/`_parse_capture` are called
+# with *both* shapes: `get_authorization`/`get_capture` return the payment, while
+# the order-reconciliation path passes an order. Treating an order as a payment
+# invents one, so these pin the discrimination.
+
+UNPAID_ORDER = {
+    "id": "ORDER-UNPAID-1",
+    "status": "CREATED",  # legacy order shape: no payment_source, no approval link
+    "intent": "AUTHORIZE",
+    "purchase_units": [{"amount": {"currency_code": "USD", "value": "2.50"}}],
+    "links": [{"rel": "self"}, {"rel": "approve"}],
+}
+
+
+def test_an_order_with_no_authorization_yields_no_authorization():
+    """The order's own id must never be reported as an authorization id.
+
+    This is the bug the order-reconciliation path tripped on: an order that holds
+    no authorization returned the order's id and status as if they were an
+    authorization's, so the "no authorization exists" guard was skipped and a
+    hold was recorded that PayPal never placed.
+    """
+    from pact.paypal.escrow import _parse_authorization
+
+    parsed = _parse_authorization(UNPAID_ORDER)
+    assert parsed.id == "", "an order is not an authorization; it must not supply an id"
+    assert parsed.status == "", "the order status (CREATED) is not an authorization status"
+
+
+def test_an_order_with_no_capture_yields_no_capture():
+    from pact.paypal.escrow import _parse_capture
+
+    parsed = _parse_capture(UNPAID_ORDER)
+    assert parsed.id == "", "an order is not a capture; it must not supply an id"
+    assert parsed.status == ""
+
+
+def test_an_order_that_holds_an_authorization_still_parses():
+    """The genuine ambiguous-authorize case must keep working."""
+    from pact.paypal.escrow import _parse_authorization
+
+    order = {
+        "id": "ORDER-PAID-1",
+        "status": "COMPLETED",
+        "purchase_units": [
+            {
+                "amount": {"currency_code": "USD", "value": "120.00"},
+                "payments": {
+                    "authorizations": [
+                        {"id": "AUTH-9", "status": "CREATED",
+                         "amount": {"currency_code": "USD", "value": "120.00"}}
+                    ]
+                },
+            }
+        ],
+    }
+    parsed = _parse_authorization(order)
+    assert parsed.id == "AUTH-9"
+    assert parsed.status == "CREATED"
+    assert parsed.amount == "120.00"
+
+
+def test_a_bare_authorization_body_is_still_parsed():
+    """`get_authorization` returns the resource itself, not an order."""
+    from pact.paypal.escrow import _parse_authorization
+
+    parsed = _parse_authorization(
+        {"id": "AUTH-DIRECT", "status": "CAPTURED", "amount": {"currency_code": "USD", "value": "7.00"}}
+    )
+    assert parsed.id == "AUTH-DIRECT"
+    assert parsed.status == "CAPTURED"
+
+
+def test_a_bare_capture_body_is_still_parsed():
+    from pact.paypal.escrow import _parse_capture
+
+    parsed = _parse_capture(
+        {"id": "CAP-DIRECT", "status": "COMPLETED", "amount": {"currency_code": "USD", "value": "7.00"}}
+    )
+    assert parsed.id == "CAP-DIRECT"
+    assert parsed.status == "COMPLETED"
+
+
+def test_malformed_payment_containers_degrade_to_absent():
+    """Wire data can be the wrong shape; parsing must not raise."""
+    from pact.paypal.escrow import _parse_authorization, _parse_capture
+
+    for bad in [
+        {"purchase_units": None},
+        {"purchase_units": []},
+        {"purchase_units": [None]},
+        {"purchase_units": [{"payments": None}]},
+        {"purchase_units": [{"payments": {"authorizations": None}}]},
+        {"purchase_units": [{"payments": {"authorizations": []}}]},
+        {"purchase_units": [{"payments": {"authorizations": [None]}}]},
+        {"purchase_units": ["nonsense"]},
+    ]:
+        assert _parse_authorization(bad).id == ""
+        assert _parse_capture(bad).id == ""
+    assert _parse_authorization({}).id == ""
+    assert _parse_capture({}).id == ""
+
+
+def test_the_parse_fix_is_load_bearing():
+    """Negative control: with the old fallback, an order masquerades as a payment.
+
+    Reproduces the pre-fix behaviour directly, so the assertions above cannot pass
+    for an unrelated reason (for example the parser returning an empty object for
+    every input).
+    """
+    from pact.paypal.escrow import _parse_authorization
+
+    def old_parse_authorization(body: dict):
+        unit = (body.get("purchase_units") or [{}])[0]
+        payments = unit.get("payments") or {}
+        authorizations = payments.get("authorizations") or []
+        node = authorizations[0] if authorizations else body
+        return node
+
+    masqueraded = old_parse_authorization(UNPAID_ORDER)
+    assert masqueraded["id"] == "ORDER-UNPAID-1", (
+        "the old fallback returned the order id as an authorization id"
+    )
+    assert masqueraded["status"] == "CREATED", (
+        "and CREATED is a HOLDABLE status, so the caller recorded a hold that never existed"
+    )
+    assert _parse_authorization(UNPAID_ORDER).id == "", "the fix removes that masquerade"
+
+
+
 def test_money_formats_and_rejects_junk():
     assert money(Decimal("1")) == "1.00"
     assert money("2.5") == "2.50"

@@ -238,6 +238,80 @@ def test_an_ambiguous_authorize_is_reconciled_from_the_order(tmp_path):
     assert reconciled.status is JobStatus.ESCROWED
 
 
+def test_an_order_with_no_authorization_never_becomes_held(tmp_path):
+    """An order that holds no authorization must not be recorded as a hold.
+
+    ``_reconcile_via_order`` asks the order whether the ambiguous authorize
+    landed. When the order carries no authorization the answer is "no", and the
+    job must resolve to NONE/FAILED. The parser used to hand back the *order's*
+    own id and status, so the "no authorization" guard was skipped and a
+    ``CREATED`` order — the legacy shape PayPal returns when ``payment_source`` is
+    missing — was read as a holdable authorization and recorded as HELD.
+    """
+    escrow = ScriptedEscrow()
+    engine = _engine(tmp_path, escrow)
+    job = engine.create_job(title="No auth", brief="b", criteria=CRITERIA,
+                            budget_max=Decimal("200"))
+    job.seller_id = "seller_nova"
+    job.agreed_price = Decimal("120.00")
+    engine.settlement.hold(job)
+
+    # PayPal reports the order as CREATED with no authorization attached: the
+    # authorize never landed. (CREATED is in HOLDABLE_STATUSES, which is exactly
+    # why reading the order status as an authorization status was unsafe.)
+    order = escrow._orders[job.escrow.order_id]
+    order.pop("authorization_id", None)
+    order["purchase_units"][0].pop("payments", None)
+    order["status"] = "CREATED"
+
+    job.escrow.authorization_id = ""
+    job.escrow.authorization_status = ""
+    engine.settlement.mark_unresolved(job, "authorize timed out")
+
+    reconciled = engine.reconcile_job(job)
+
+    assert reconciled.escrow.state is not EscrowState.HELD, (
+        "no authorization exists on the order, so no hold may be recorded"
+    )
+    assert reconciled.escrow.state is EscrowState.NONE
+    assert reconciled.status is JobStatus.FAILED
+    assert reconciled.escrow.authorization_id == "", (
+        "the order id must not be stored as an authorization id"
+    )
+    # And nothing may proceed to delivery or capture from here.
+    with pytest.raises(ValueError):
+        engine.settlement.release(reconciled)
+
+
+def test_the_authorization_conflation_was_load_bearing(tmp_path):
+    """Negative control for the test above: the old parser produced a fake hold.
+
+    Runs the same scenario through the pre-fix parser to show the assertion above
+    is not vacuous — the old code really did record HELD for an order with no
+    authorization.
+    """
+    from pact.paypal.escrow import HOLDABLE_STATUSES
+
+    def old_parse_authorization(body: dict) -> tuple[str, str]:
+        unit = (body.get("purchase_units") or [{}])[0]
+        payments = unit.get("payments") or {}
+        authorizations = payments.get("authorizations") or []
+        node = authorizations[0] if authorizations else body
+        return node.get("id", ""), node.get("status", "")
+
+    order = {
+        "id": "ORDER-NO-AUTH",
+        "status": "CREATED",
+        "purchase_units": [{"amount": {"currency_code": "USD", "value": "120.00"}}],
+    }
+    auth_id, status = old_parse_authorization(order)
+    assert auth_id == "ORDER-NO-AUTH", "the old parser returned the order id as an authorization id"
+    assert status.upper() in HOLDABLE_STATUSES, (
+        "so the caller's `status in HOLDABLE_STATUSES` check passed and the job was "
+        "recorded as HELD with no authorization behind it"
+    )
+
+
 # ------------------------------------------------ D. definite capture failures
 
 

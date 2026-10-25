@@ -407,14 +407,42 @@ def _describe_error(response: httpx.Response, body: Any) -> str:
     return f"PayPal error {name}: {detail}".strip()
 
 
+def _nested_payment(body: dict, key: str) -> dict | None:
+    """Read ``purchase_units[0].payments[key][0]`` from an *order* body.
+
+    Returns ``None`` when ``body`` is not an order, or when the order holds no
+    such payment. The distinction matters: an order and a Payments v2
+    authorization/capture are different resources that both carry ``id`` and
+    ``status``, so treating an order as a payment invents one. A caller that
+    cannot find the payment must learn that it is absent, not receive the
+    order's own id dressed up as an authorization.
+    """
+    if not isinstance(body, dict) or not body.get("purchase_units"):
+        return None
+    units = body["purchase_units"]
+    unit = units[0] if isinstance(units, list) and units else {}
+    payments = unit.get("payments") if isinstance(unit, dict) else None
+    found = (payments or {}).get(key) if isinstance(payments, dict) else None
+    if isinstance(found, list) and found and isinstance(found[0], dict):
+        return found[0]
+    return None
+
+
+def _payment_node(body: dict, key: str) -> dict:
+    """The payment resource in ``body``: nested in an order, or ``body`` itself.
+
+    ``get_authorization``/``get_capture`` return the resource directly, so a body
+    without ``purchase_units`` *is* the payment. An order body is never the payment.
+    """
+    if not isinstance(body, dict):
+        return {}
+    if body.get("purchase_units"):
+        return _nested_payment(body, key) or {}
+    return body
+
+
 def _parse_authorization(body: dict) -> Authorization:
-    unit = (body.get("purchase_units") or [{}])[0]
-    payments = unit.get("payments") or {}
-    authorizations = payments.get("authorizations") or []
-    if authorizations:
-        node = authorizations[0]
-    else:
-        node = body
+    node = _payment_node(body, "authorizations")
     amount = node.get("amount") or {}
     return Authorization(
         id=node.get("id", ""),
@@ -432,10 +460,7 @@ def _parse_capture(body: dict) -> Capture:
     Used to recover a capture whose id was lost with a failed response: the order
     is authoritative about what was captured against it.
     """
-    unit = (body.get("purchase_units") or [{}])[0]
-    payments = unit.get("payments") or {}
-    captures = payments.get("captures") or []
-    node = captures[0] if captures else body
+    node = _payment_node(body, "captures")
     amount = node.get("amount") or {}
     return Capture(
         id=node.get("id", ""),
