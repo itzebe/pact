@@ -1,6 +1,6 @@
 # Pact
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact>
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo.mp4`](docs/demo/pact-demo.mp4) (2:25, real capture of the deployed app against PayPal Sandbox)
 
 **Settlement infrastructure for the agent economy, built on PayPal escrow.**
 
@@ -81,10 +81,40 @@ Open http://localhost:5173, pick a job preset, and press **Post job and settle**
 
 ### 3. Tests
 
+The suite has two backends. Most tests run against the filesystem store and need
+nothing extra. The durability and cross-process tests need a reachable Postgres
+and the optional `postgres` dependency, and skip themselves otherwise.
+
 ```bash
 cd backend && source .venv/bin/activate
+
+# Development dependencies (pytest). Does NOT include the Postgres driver.
+uv pip install -e ".[dev]"
+
+# Filesystem-backed suite — the default, no database required.
+# 218 passed, 16 skipped (the Postgres tests skip themselves).
 python -m pytest tests/ -q
 ```
+
+To run the complete suite, add the `postgres` extra and point the tests at a
+database. The extra is a separate dependency group — `".[dev]"` alone leaves the
+Postgres tests skipped:
+
+```bash
+# Add the Postgres driver (psycopg). Also covers the extra plus dev tooling:
+uv pip install -e ".[dev,postgres]"
+
+# Point the tests at any reachable Postgres, then run everything.
+# 234 passed — nothing skipped.
+createdb pact                                          # or a Neon/Supabase/RDS URL
+export DATABASE_URL=postgresql://localhost/pact
+python -m pytest tests/ -q
+```
+
+`DATABASE_URL` is the only variable these tests read; it is the same setting the
+application uses for durable storage. Every setting, including `DATABASE_URL`, is
+documented in [`.env.example`](.env.example). Omit it and the Postgres tests report
+as skipped, which is expected — never a failure.
 
 Frontend unit tests (Node's built-in runner, no extra dependency):
 
@@ -245,8 +275,9 @@ The tables are created on first use, so no migration step is needed.
 ### Verifying the serverless path locally
 
 The Postgres tests are skipped unless a database is reachable, so the default
-suite stays dependency-free. Point them at a database to exercise durability,
-the read-only-filesystem path, and the cross-process capture race:
+suite stays dependency-free. They also need the optional `postgres` extra
+(`uv pip install -e ".[dev,postgres]"`). Point them at a database to exercise
+durability, the read-only-filesystem path, and the cross-process capture race:
 
 ```bash
 createdb pact

@@ -2,7 +2,13 @@
 
 Paste-ready text for the Devpost submission form.
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact>
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo.mp4`](demo/pact-demo.mp4)
+
+The demo video (2:25) is a screen capture of the deployed app against PayPal
+Sandbox. The settlement it shows is a real production record — order
+`9BU01766CS027323X`, authorization `7GB0704898318210B`, capture `05962303KN297374V`,
+capture status `COMPLETED`. Every identifier on screen is real; the narration is
+in [`docs/DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
 
 ---
 
@@ -53,7 +59,7 @@ The second challenge was guardrails. Models will happily agree to a price above 
 - An agent market that visibly self-corrects through reputation, demonstrated end to end.
 - A tamper-evident audit trail a finance team could actually reconcile against.
 - Runs with zero setup: no PayPal account or API key needed to see the whole thing work, but real sandbox settlement the moment credentials are added.
-- 234 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app.
+- 234 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app. 218 run with no external dependencies; the remaining 16 are Postgres durability tests that run when `DATABASE_URL` is set (see [README.md](../README.md#3-tests)).
 
 ## What we learned
 
@@ -81,7 +87,7 @@ The primitive already exists. The interesting work in agent commerce is not movi
 | **PayPal Orders v2 API** | The settlement rail. `intent=AUTHORIZE` on order creation, `POST /v2/checkout/orders/{id}/authorize` to place the hold, `POST /v2/payments/authorizations/{id}/capture` to release, `POST /v2/payments/authorizations/{id}/void` to return. Idempotent via `PayPal-Request-Id`. |
 | **PayPal Sandbox** | The environment the demo runs against, so the money movement is real API traffic without real money. Sandbox credentials via `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`. |
 | **AG Grid** | The settlement ledger grid: sortable, resizable audit records with hash-chain status. |
-| **AI model (OpenAI-compatible)** | Three distinct agent roles — seller quoting, buyer countering, and independent verification of the deliverable. Any OpenAI-compatible provider works; the model and base URL are configuration, not hard-coded. |
+| **AI model (OpenAI-compatible)** | Three distinct agent roles — seller quoting, buyer countering, and independent verification of the deliverable. Any OpenAI-compatible provider works; the model and base URL are configuration, not hard-coded. The deployed demo runs live on Groq's OpenAI-compatible endpoint with `openai/gpt-oss-20b`. |
 | **PayPal Agent Toolkit** | Evaluated as a candidate integration path. Rejected for this use case because it hard-codes immediate capture and cannot express a conditional hold. See "How we built it". |
 | **Docker** | Single-container build that serves both the API and the built UI, so a judge can run the whole project with one command. |
 

@@ -11,6 +11,10 @@ venv/
 data/
 *.tmp
 
+# Demo tooling intermediate output (narration mp3s, raw webm, assembled mp4).
+# The finished video is committed at docs/demo/pact-demo.mp4.
+docs/demo/tools/build/
+
 # Node
 node_modules/
 dist/
