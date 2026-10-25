@@ -21,7 +21,7 @@ Verified against PayPal's published OpenAPI specifications
 * The authorize endpoint documents that "the buyer must first approve the order
   or a valid payment_source must be provided in the request", so a caller that
   skips approval cannot authorize. :func:`approval_url` surfaces the HATEOAS
-  ``approve`` link for that step.
+  ``rel:payer-action`` link (``rel:approve`` on a legacy order) for that step.
 * Voiding is documented as impossible once a payment is fully captured, which is
   why the capture and void paths are mutually exclusive.
 
@@ -450,9 +450,11 @@ def approval_url(order: dict) -> str | None:
     """Return the buyer-approval URL from a created order's HATEOAS links.
 
     PayPal requires the buyer to approve an order before it can be authorized
-    (unless a valid ``payment_source`` is supplied in the request). The
-    ``rel:approve`` link is where the buyer is sent to do that, so a caller that
-    cannot obtain approval must not proceed to authorize.
+    (unless a valid ``payment_source`` is supplied in the request). A modern
+    order carries a ``rel:payer-action`` link to that page; an order created
+    without ``payment_source`` falls back to the legacy ``rel:approve``, so both
+    are accepted. A caller that cannot obtain approval must not proceed to
+    authorize.
     """
     for link in order.get("links") or []:
         if not isinstance(link, dict):

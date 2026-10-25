@@ -19,7 +19,7 @@ Every serious "trust layer for agents" effort today — Circle, BNB Chain, ERC-8
 
 PayPal already provides the exact primitive this needs. Orders v2 supports `intent=AUTHORIZE`, which **reserves** funds rather than taking them, and then offers a genuine two-way branch: `capture` to release, or `void` to return. That is escrow, and it works in the sandbox. Pact builds the missing protocol on top of it.
 
-One detail that shapes the whole design: PayPal will not authorize an order until the buyer approves it (or a `payment_source` is supplied inline). Pact does not skip that step — it surfaces the order's `rel:approve` link, stops before any work is produced, and only continues once the buyer has approved. Funds are never claimed to be held on the strength of a created order.
+One detail that shapes the whole design: PayPal will not authorize an order until the buyer approves it (or a `payment_source` is supplied inline). Pact does not skip that step — it surfaces the order's `rel:payer-action` link, stops before any work is produced, and only continues once the buyer has approved. Funds are never claimed to be held on the strength of a created order.
 
 ---
 
