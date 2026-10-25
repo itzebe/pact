@@ -21,6 +21,13 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+# Sentinel for ``EscrowRecord.capture_id`` meaning "a capture has been claimed but
+# its outcome is not yet recorded". It is written *before* the provider call so a
+# second instance cannot capture the same authorization, so it must be
+# distinguishable both from a real capture id and from no capture at all.
+IN_FLIGHT_CAPTURE = "pending"
+
+
 class JobStatus(str, Enum):
     OPEN = "open"
     NEGOTIATING = "negotiating"

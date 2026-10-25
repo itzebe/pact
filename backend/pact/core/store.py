@@ -196,6 +196,20 @@ class ReputationLedger:
             self._flush()
             return dict(record)
 
+    def record_reconciliation_reversed(self, agent_id: str) -> dict:
+        """Withdraw the failure charged for an outcome that turned out to be no fault.
+
+        ``mark_unresolved`` records a failure while the outcome is unknown, because
+        that is the honest reading at the time. When reconciliation establishes that
+        no capture was applied — the hold is intact, or the authorize simply landed
+        — the seller did nothing wrong and the failure must be withdrawn.
+        """
+        with self._lock:
+            record = self._record_for(agent_id)
+            record["failed"] = max(0, record["failed"] - 1)
+            self._flush()
+            return dict(record)
+
     def record_reconciled(self, agent_id: str, amount: float) -> dict:
         """Correct an earlier unresolved outcome once PayPal confirms the payment.
 
