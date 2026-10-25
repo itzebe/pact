@@ -125,9 +125,26 @@ def _parse_seller_ids(raw: list[str] | None) -> list[str] | None:
     return out or None
 
 
+def _public_base(request: Request) -> str:
+    """The deployment's own base URL, for building PayPal return/cancel links.
+
+    ``PACT_PUBLIC_URL`` wins when set. Otherwise the request's own host is used,
+    which is correct behind Vercel's proxy (``X-Forwarded-Host``/``Proto``). This
+    keeps the return target real on any deployment without extra configuration,
+    rather than baking in a placeholder host that would strand the buyer.
+    """
+    if settings.public_url:
+        return settings.public_url
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if not forwarded_host:
+        return ""
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return f"{proto}://{forwarded_host}"
+
+
 @router.post("/jobs/{job_id}/run")
 async def run_job(
-    job_id: str, seller_ids: list[str] | None = Query(default=None)
+    job_id: str, request: Request, seller_ids: list[str] | None = Query(default=None)
 ) -> dict[str, Any]:
     """Run the full lifecycle. Executed off the event loop so it cannot block it.
 
@@ -145,7 +162,7 @@ async def run_job(
         raise HTTPException(status_code=400, detail=f"Unknown seller(s): {', '.join(unknown)}")
 
     try:
-        completed = await asyncio.to_thread(engine.run, job, requested)
+        completed = await asyncio.to_thread(engine.run, job, requested, public_url=_public_base(request))
     except JobAlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _job_full(completed)

@@ -79,7 +79,7 @@ class PactEngine:
 
     # ----------------------------------------------------------- lifecycle
 
-    def run(self, job: Job, seller_ids: list[str] | None = None) -> Job:
+    def run(self, job: Job, seller_ids: list[str] | None = None, *, public_url: str | None = None) -> Job:
         """Drive the job to a terminal state. Never raises on a failed settlement.
 
         Concurrency: a job that is already mid-flight is refused rather than run
@@ -146,7 +146,7 @@ class PactEngine:
 
         # --- hold funds
         try:
-            self.settlement.hold(job)
+            self.settlement.hold(job, public_url=public_url)
         except (PayPalError, ValueError) as exc:
             if getattr(exc, "ambiguous", False):
                 self.settlement.mark_unresolved(job, str(exc))
