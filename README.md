@@ -196,6 +196,52 @@ Interactive docs at `http://localhost:8000/docs`.
 
 ---
 
+## Deploying to Vercel
+
+Vercel Functions have a read-only filesystem with ephemeral `/tmp`, and several
+instances may serve the same job. Two things follow, and both are handled:
+
+- **Persistence must be external.** Set `DATABASE_URL` to a Postgres URL
+  (Vercel Postgres, Neon, Supabase, and so on). Jobs and the reputation ledger
+  then live in the database. Without it the app still runs, but `/api/health`
+  reports `"durable": false` and the ledger is lost on cold start.
+- **Settlement must be instance-safe.** On Postgres the store takes a session
+  advisory lock per job and re-reads the authoritative row inside it, so two
+  instances cannot both capture the same authorization. The filesystem store
+  cannot do this; its `threading.RLock` only protects one process.
+
+The repository is already configured — `vercel.json` builds the frontend and
+routes `/api/*` to the FastAPI function in `api/index.py`.
+
+1. Import the repository at [vercel.com/new](https://vercel.com/new). Leave the
+   framework preset as **Other**; `vercel.json` supplies the commands.
+2. Create a Postgres database and add its pooled connection string as the
+   `DATABASE_URL` environment variable for Production, Preview, and Development.
+3. Add `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` (sandbox) and, optionally,
+   `LLM_API_KEY` and `LLM_MODEL`. Without PayPal credentials the escrow runs
+   against the in-memory double and the UI labels it "Simulated PayPal".
+4. Deploy, then confirm the wiring:
+
+```bash
+curl -s https://<your-deployment>/api/health | jq '{paypal: .paypal.mode, storage}'
+```
+
+`storage.backend` should read `postgres` and `storage.durable` should be `true`.
+The tables are created on first use, so no migration step is needed.
+
+### Verifying the serverless path locally
+
+The Postgres tests are skipped unless a database is reachable, so the default
+suite stays dependency-free. Point them at a database to exercise durability,
+the read-only-filesystem path, and the cross-process capture race:
+
+```bash
+createdb pact
+DATABASE_URL=postgresql://localhost/pact pytest tests/test_postgres_store.py -v
+```
+
+---
+
 ## Tools used
 
 | Tool | How it is used |

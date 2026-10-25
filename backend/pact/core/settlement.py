@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from contextlib import contextmanager
 from decimal import Decimal
+from typing import Iterator
 
 from ..paypal import EscrowBackend, PayPalError
 from ..paypal.escrow import HOLDABLE_STATUSES, SETTLED_CAPTURE_STATUSES, approval_url
@@ -189,13 +191,50 @@ class SettlementEngine:
        because a duplicate capture is the one failure that costs real money.
     """
 
-    def __init__(self, escrow: EscrowBackend, reputation: ReputationLedger) -> None:
+    def __init__(self, escrow: EscrowBackend, reputation: ReputationLedger,
+                 store: object | None = None) -> None:
         self.escrow = escrow
         self.reputation = reputation
+        self.store = store
         # Guards the transition into a terminal settlement state. Without it, two
         # concurrent release/refund calls can both pass the state check and both
         # reach the provider, which is how a duplicate capture happens.
         self._settle_lock = threading.RLock()
+
+    @contextmanager
+    def _guard(self, job: Job) -> Iterator[None]:
+        """Serialise settlement for one job, across processes as well as threads.
+
+        ``_settle_lock`` only protects a single process. On a platform that runs
+        several instances, two of them can hold the same job and both capture. When
+        the store can take a shared claim (Postgres), hold it and adopt the stored
+        escrow state, so an attempt that already moved money is visible here as a
+        recorded capture rather than an open authorization.
+        """
+        store = self.store
+        if store is not None and getattr(store, "supports_claims", False):
+            with store.settlement_claim(job) as fresh:
+                if fresh is not None:
+                    # Adopt the authoritative escrow record. A capture recorded by
+                    # another instance then trips the "already captured" check below.
+                    job.escrow = fresh.escrow
+                    job.status = fresh.status
+                with self._settle_lock:
+                    yield
+            return
+        with self._settle_lock:
+            yield
+
+    def _persist(self, job: Job) -> None:
+        """Push the current escrow state to the shared store, if there is one.
+
+        On the DB path this is what makes a claim visible to other instances. The
+        in-memory ``capture_id = "pending"`` marker is meaningless to a process that
+        never saw it, so it has to be written before the provider is called.
+        """
+        store = self.store
+        if store is not None and getattr(store, "supports_claims", False):
+            store.save(job)
 
     @property
     def mode(self) -> str:
@@ -350,10 +389,11 @@ class SettlementEngine:
     def release(self, job: Job, note: str = "") -> Job:
         """Capture the held funds because the delivery passed verification.
 
-        The whole transition is serialised on ``_settle_lock`` so a second
-        concurrent attempt cannot slip past the state check and capture twice.
+        The whole transition is serialised on the settlement guard so a second
+        concurrent attempt — in another thread or another instance — cannot slip
+        past the state check and capture twice.
         """
-        with self._settle_lock:
+        with self._guard(job):
             if job.escrow.state != EscrowState.HELD:
                 raise ValueError(f"Cannot release escrow in state {job.escrow.state}")
             if not job.escrow.authorization_id:
@@ -365,6 +405,9 @@ class SettlementEngine:
             # Claim the authorization before calling out, so a racing attempt sees
             # an in-progress capture rather than an open one.
             job.escrow.capture_id = "pending"
+            # Write the claim before the call, so a second instance that takes the
+            # lock next sees a capture in progress instead of an open authorization.
+            self._persist(job)
             try:
                 capture = self.escrow.capture_authorization(
                     job.escrow.authorization_id,
@@ -379,6 +422,11 @@ class SettlementEngine:
                            authorization_id=job.escrow.authorization_id)
                 if getattr(exc, "ambiguous", False):
                     self.mark_unresolved(job, f"Capture outcome unknown: {exc}")
+                else:
+                    # Definite failure: no money moved, so withdraw the claim. Leaving
+                    # "pending" in the shared row would wedge the job permanently,
+                    # because every later attempt would see a capture that never was.
+                    self._persist(job)
                 raise
 
             job.escrow.capture_id = capture.id
@@ -422,6 +470,7 @@ class SettlementEngine:
                     agent_id=job.seller_id,
                     score=self.reputation.score(record),
                 )
+            self._persist(job)
             return job
 
     def refund(self, job: Job, reason: str = "") -> Job:
@@ -430,7 +479,7 @@ class SettlementEngine:
         A void returns the buyer's funds and moves no money, so the job ends in
         ``VOIDED`` rather than ``REFUNDED`` — nothing was ever captured to refund.
         """
-        with self._settle_lock:
+        with self._guard(job):
             if job.escrow.state != EscrowState.HELD:
                 raise ValueError(f"Cannot void escrow in state {job.escrow.state}")
             if not job.escrow.authorization_id:
@@ -476,6 +525,7 @@ class SettlementEngine:
                     agent_id=job.seller_id,
                     score=self.reputation.score(record),
                 )
+            self._persist(job)
             return job
 
     def _confirm_void(self, authorization_id: str) -> bool:
@@ -502,4 +552,5 @@ class SettlementEngine:
         )
         if job.seller_id:
             self.reputation.record_failed(job.seller_id)
+        self._persist(job)
         return job

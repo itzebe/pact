@@ -15,7 +15,7 @@ WORKDIR /app/backend
 COPY backend/pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-        fastapi "uvicorn[standard]" httpx pydantic python-dotenv sse-starlette
+        fastapi "uvicorn[standard]" httpx pydantic python-dotenv sse-starlette "psycopg[binary]"
 
 COPY backend/ ./
 COPY --from=web /web/dist /app/static

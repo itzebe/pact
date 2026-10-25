@@ -68,6 +68,12 @@ def health() -> dict[str, Any]:
         },
         "currency": settings.currency,
         "sellers": default_seller_ids(),
+        # Which persistence is actually in use, so a deployment can never be
+        # mistaken for durable when it is not.
+        "storage": {
+            "backend": getattr(engine.store, "backend", "unknown"),
+            "durable": bool(getattr(engine.store, "durable", False)),
+        },
     }
 
 
