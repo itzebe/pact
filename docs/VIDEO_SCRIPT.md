@@ -1,5 +1,11 @@
 # Demo video script
 
+> **Status: superseded.** The video has been produced — see
+> [`docs/demo/pact-demo.mp4`](demo/pact-demo.mp4), with the recorded narration in
+> [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) and the toolchain in
+> [`DEMO_RECORDING.md`](DEMO_RECORDING.md). The plan below is kept for reference;
+> the "shot list" at the end remains a good list of future additions.
+
 Target: **2:40** (limit is 3:00). Record at 1080p, browser zoom ~100%, window 1600px wide.
 Have the app already running with **two settlements completed** so the reputation panel has history.
 
