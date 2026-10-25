@@ -13,13 +13,13 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import settings
-from ..core.engine import engine
-from ..core.models import Job
+from ..core.engine import JobAlreadyRunning, engine
+from ..core.models import EscrowState, Job
 from ..core.negotiation import default_seller_ids
 
 log = logging.getLogger("pact.api")
@@ -40,7 +40,7 @@ class SellerInfo(BaseModel):
     agent_id: str
     score: float
     settled: int
-    refunded: int
+    voided: int
     failed: int
     volume: float
 
@@ -90,13 +90,65 @@ async def create_job(payload: JobCreate) -> dict[str, Any]:
     return _job_full(job)
 
 
+def _parse_seller_ids(raw: list[str] | None) -> list[str] | None:
+    """Flatten a ``seller_ids`` query value that may be comma-separated or repeated.
+
+    ``Query`` is required: a bare ``list[str]`` on a POST route is parsed as a
+    *body* field, so the query parameter is dropped silently and every run would
+    invite the default sellers regardless of what the caller asked for.
+    """
+    if not raw:
+        return None
+    out: list[str] = []
+    for chunk in raw:
+        for part in str(chunk).split(","):
+            part = part.strip()
+            if part and part not in out:
+                out.append(part)
+    return out or None
+
+
 @router.post("/jobs/{job_id}/run")
-async def run_job(job_id: str, seller_ids: list[str] | None = None) -> dict[str, Any]:
-    """Run the full lifecycle. Executed off the event loop so it cannot block it."""
+async def run_job(
+    job_id: str, seller_ids: list[str] | None = Query(default=None)
+) -> dict[str, Any]:
+    """Run the full lifecycle. Executed off the event loop so it cannot block it.
+
+    A job that is already mid-flight is refused with 409 rather than run twice, so
+    two concurrent requests cannot produce a duplicate capture.
+    """
     job = _job_or_404(job_id)
     if job.status.value not in {"open", "failed"}:
         raise HTTPException(status_code=409, detail=f"Job is already {job.status.value}")
-    completed = await asyncio.to_thread(engine.run, job, seller_ids or default_seller_ids())
+
+    requested = _parse_seller_ids(seller_ids) or default_seller_ids()
+    known = set(default_seller_ids())
+    unknown = [s for s in requested if s not in known]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown seller(s): {', '.join(unknown)}")
+
+    try:
+        completed = await asyncio.to_thread(engine.run, job, requested)
+    except JobAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _job_full(completed)
+
+
+@router.post("/jobs/{job_id}/approve")
+async def approve_job(job_id: str) -> dict[str, Any]:
+    """Continue a job after the buyer has approved the PayPal order.
+
+    Only meaningful in real PayPal mode, where an order cannot be authorized until
+    the buyer visits the approval URL. In simulated mode the order is authorized
+    immediately and this returns 409.
+    """
+    job = _job_or_404(job_id)
+    if job.escrow.state is not EscrowState.AWAITING_APPROVAL:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is not awaiting buyer approval (escrow state {job.escrow.state.value})",
+        )
+    completed = await asyncio.to_thread(engine.approve_and_hold, job)
     return _job_full(completed)
 
 
@@ -151,7 +203,7 @@ async def stream_job(job_id: str, request: Request) -> EventSourceResponse:
                         default=str,
                     ),
                 }
-            if job.status.value in {"settled", "refunded", "failed"} and seen >= len(job.ledger):
+            if job.status.value in {"settled", "voided", "refunded", "failed", "unresolved"} and seen >= len(job.ledger):
                 yield {"event": "done", "data": json.dumps({"status": job.status.value})}
                 break
             idle_ticks += 1
@@ -232,8 +284,11 @@ def _job_full(job: Job) -> dict[str, Any]:
                 "mode": job.escrow.mode,
                 "state": job.escrow.state.value,
                 "order_id": job.escrow.order_id,
+                "approval_url": job.escrow.approval_url,
                 "authorization_id": job.escrow.authorization_id,
+                "authorization_status": job.escrow.authorization_status,
                 "capture_id": job.escrow.capture_id,
+                "capture_status": job.escrow.capture_status,
                 "refund_id": job.escrow.refund_id,
                 "amount": float(job.escrow.amount),
                 "currency": job.escrow.currency,

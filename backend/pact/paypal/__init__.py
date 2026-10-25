@@ -6,12 +6,23 @@ import logging
 from typing import Protocol
 
 from ..config import settings
-from .escrow import Authorization, Capture, PayPalError, PayPalEscrowClient, money
+from .escrow import (
+    HOLDABLE_STATUSES,
+    SETTLED_CAPTURE_STATUSES,
+    AmbiguousOutcome,
+    Authorization,
+    Capture,
+    PayPalError,
+    PayPalEscrowClient,
+    approval_url,
+    money,
+)
 from .mock import MockPayPalEscrowClient
 
 log = logging.getLogger("pact.paypal")
 
 __all__ = [
+    "AmbiguousOutcome",
     "Authorization",
     "Capture",
     "PayPalError",
@@ -19,12 +30,17 @@ __all__ = [
     "MockPayPalEscrowClient",
     "EscrowBackend",
     "build_escrow_client",
+    "approval_url",
     "money",
+    "HOLDABLE_STATUSES",
+    "SETTLED_CAPTURE_STATUSES",
 ]
 
 
 class EscrowBackend(Protocol):
     """The escrow surface Pact depends on, real or simulated."""
+
+    environment: str
 
     @property
     def configured(self) -> bool: ...
@@ -35,6 +51,8 @@ class EscrowBackend(Protocol):
     def void_authorization(self, authorization_id: str, **kwargs) -> None: ...
     def refund_capture(self, capture_id: str, **kwargs) -> dict: ...
     def get_order(self, order_id: str) -> dict: ...
+    def get_authorization(self, authorization_id: str) -> Authorization: ...
+    def get_capture(self, capture_id: str) -> Capture: ...
 
 
 def build_escrow_client() -> EscrowBackend:

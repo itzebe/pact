@@ -28,6 +28,10 @@ from .store import JobStore, ReputationLedger, job_store, reputation
 log = logging.getLogger("pact.engine")
 
 
+class JobAlreadyRunning(RuntimeError):
+    """Raised when a job that is already mid-flight is asked to run again."""
+
+
 class PactEngine:
     def __init__(
         self,
@@ -76,7 +80,17 @@ class PactEngine:
     # ----------------------------------------------------------- lifecycle
 
     def run(self, job: Job, seller_ids: list[str] | None = None) -> Job:
-        """Drive the job to a terminal state. Never raises on a failed settlement."""
+        """Drive the job to a terminal state. Never raises on a failed settlement.
+
+        Concurrency: a job that is already mid-flight is refused rather than run
+        twice, so two simultaneous settlement requests cannot produce a duplicate
+        capture or contradictory terminal states.
+        """
+        if job.status not in {JobStatus.OPEN, JobStatus.FAILED}:
+            raise JobAlreadyRunning(
+                f"Job {job.id} is {job.status.value}; refusing to run it again"
+            )
+
         seller_ids = seller_ids or default_seller_ids()
         job.status = JobStatus.NEGOTIATING
         job.append("negotiation_started", "pact", f"Inviting sellers: {', '.join(seller_ids)}")
@@ -126,11 +140,20 @@ class PactEngine:
         try:
             self.settlement.hold(job)
         except (PayPalError, ValueError) as exc:
-            job.status = JobStatus.FAILED
-            job.append("escrow_error", "pact", f"Could not escrow funds: {exc}")
+            if getattr(exc, "ambiguous", False):
+                self.settlement.mark_unresolved(job, str(exc))
+            else:
+                job.status = JobStatus.FAILED
+                job.append("escrow_error", "pact", f"Could not escrow funds: {exc}")
             self.store.save(job)
             return job
         self.store.save(job)
+
+        # Nothing may be delivered unless funds are genuinely held. This covers a
+        # real order still awaiting buyer approval, a denied authorization, and an
+        # outcome we could not determine — none of which permit work to start.
+        if job.escrow.state is not EscrowState.HELD:
+            return job
 
         # --- deliver
         job.status = JobStatus.DELIVERED
@@ -144,10 +167,22 @@ class PactEngine:
         )
         self.store.save(job)
 
+        return self.settle_delivery(job)
+
+    def settle_delivery(self, job: Job) -> Job:
+        """Verify the stored delivery and settle against it.
+
+        Verification runs against the delivery already attached to this job, so a
+        verdict can only ever be about the artifact that was submitted for this
+        authorization.
+        """
+        if job.delivery is None:
+            raise ValueError("Cannot settle a job with no delivery")
+
         # --- verify
         job.status = JobStatus.VERIFYING
         job.append("verification_started", "pact", "Independent verification of the delivery")
-        verification = self.verifier.verify(job, delivery)
+        verification = self.verifier.verify(job, job.delivery)
         job.verification = verification
         job.append(
             "verification_result",
@@ -167,29 +202,53 @@ class PactEngine:
             else:
                 self.settlement.refund(job, reason=verification.summary or "Delivery did not meet the criteria")
         except (PayPalError, ValueError) as exc:
-            job.status = JobStatus.FAILED
-            job.append("settlement_error", "pact", f"Settlement failed: {exc}")
+            if getattr(exc, "ambiguous", False):
+                self.settlement.mark_unresolved(job, str(exc))
+            else:
+                job.status = JobStatus.FAILED
+                job.append("settlement_error", "pact", f"Settlement failed: {exc}")
             self.store.save(job)
             return job
 
         self.store.save(job)
         return job
 
+    def approve_and_hold(self, job: Job) -> Job:
+        """Continue a job whose order the buyer has now approved."""
+        if job.escrow.state != EscrowState.AWAITING_APPROVAL:
+            raise ValueError(f"Job is not awaiting approval (escrow state {job.escrow.state})")
+        try:
+            self.settlement.authorize_hold(job)
+        except (PayPalError, ValueError) as exc:
+            if not getattr(exc, "ambiguous", False):
+                job.status = JobStatus.FAILED
+                job.append("escrow_error", "pact", f"Could not escrow funds: {exc}")
+            self.store.save(job)
+            return job
+        self.store.save(job)
+
+        # The buyer has approved and funds are held; produce and settle the work.
+        job.status = JobStatus.DELIVERED
+        delivery = SellerAgent(self.llm, job.seller_id or "").deliver(job)
+        job.delivery = delivery
+        job.append(
+            "delivery",
+            job.seller_id or "seller",
+            f"Delivered: {delivery.summary or 'no summary'}",
+            chars=len(delivery.artifact),
+        )
+        self.store.save(job)
+        return self.settle_delivery(job)
+
     def settle_existing(self, job: Job) -> Job:
-        """Verify and settle a job that already holds escrow (used to demo a refund)."""
+        """Verify and settle a job that already holds escrow.
+
+        Refuses to touch a job that has already reached a terminal settlement
+        state, so a repeat call cannot capture twice.
+        """
         if job.escrow.state != EscrowState.HELD or job.delivery is None:
             return job
-        verification = self.verifier.verify(job, job.delivery)
-        job.verification = verification
-        job.append("verification_result", "verifier",
-                   f"Verification {'PASSED' if verification.passed else 'FAILED'} (score {verification.score:.2f})",
-                   passed=verification.passed, score=verification.score)
-        if verification.passed:
-            self.settlement.release(job)
-        else:
-            self.settlement.refund(job, reason=verification.summary)
-        self.store.save(job)
-        return job
+        return self.settle_delivery(job)
 
 
 engine = PactEngine()

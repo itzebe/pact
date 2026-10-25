@@ -25,20 +25,25 @@ class JobStatus(str, Enum):
     OPEN = "open"
     NEGOTIATING = "negotiating"
     AGREED = "agreed"
+    AWAITING_APPROVAL = "awaiting_approval"  # order created, buyer has not approved yet
     ESCROWED = "escrowed"
     DELIVERED = "delivered"
     VERIFYING = "verifying"
     SETTLED = "settled"
-    REFUNDED = "refunded"
+    VOIDED = "voided"        # hold released, buyer charged nothing (no money moved)
+    REFUNDED = "refunded"    # a capture was reversed after the fact
+    UNRESOLVED = "unresolved"  # outcome unknown; requires reconciliation, never auto-completed
     FAILED = "failed"
 
 
 class EscrowState(str, Enum):
     NONE = "none"
+    AWAITING_APPROVAL = "awaiting_approval"
     HELD = "held"
     RELEASED = "released"
     VOIDED = "voided"
     REFUNDED = "refunded"
+    UNRESOLVED = "unresolved"
 
 
 class Message(BaseModel):
@@ -85,8 +90,11 @@ class EscrowRecord(BaseModel):
     provider: str = "paypal"
     mode: str = "sandbox"  # sandbox | live | mock
     order_id: str = ""
+    approval_url: str = ""
     authorization_id: str = ""
+    authorization_status: str = ""
     capture_id: str = ""
+    capture_status: str = ""
     refund_id: str = ""
     amount: Decimal = Decimal("0")
     currency: str = "USD"

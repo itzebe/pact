@@ -100,7 +100,7 @@ class ReputationLedger:
             {
                 "agent_id": agent_id,
                 "settled": 0,
-                "refunded": 0,
+                "voided": 0,
                 "failed": 0,
                 "volume": 0.0,
                 "last_settled_at": None,
@@ -116,10 +116,10 @@ class ReputationLedger:
             self._flush()
             return dict(record)
 
-    def record_refunded(self, agent_id: str) -> dict:
+    def record_voided(self, agent_id: str) -> dict:
         with self._lock:
             record = self._record_for(agent_id)
-            record["refunded"] += 1
+            record["voided"] += 1
             self._flush()
             return dict(record)
 
@@ -139,8 +139,8 @@ class ReputationLedger:
         proven. Two pseudo-observations give a defensible prior.
         """
         settled = record.get("settled", 0)
-        refunded = record.get("refunded", 0)
-        failures = refunded + record.get("failed", 0)
+        voided = record.get("voided", 0)
+        failures = voided + record.get("failed", 0)
         return round((settled + 1) / (settled + failures + 2), 3)
 
     def all(self) -> list[dict]:

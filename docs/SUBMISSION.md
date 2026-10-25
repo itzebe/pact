@@ -17,7 +17,7 @@ PayPal Orders v2 supports `intent=AUTHORIZE`, which *reserves* funds instead of 
 A buyer posts a job with a brief, acceptance criteria, and a hard budget ceiling.
 
 1. **Seller agents compete.** They quote, the buyer counters, and the price converges over rounds. The budget is enforced in code — an out-of-budget agreement is rejected by the engine no matter what the model returns.
-2. **Funds are held before work begins.** Pact creates a PayPal order with `intent=AUTHORIZE` and authorizes it. The seller has committed funds to deliver against; the buyer has parted with nothing.
+2. **Funds are held before work begins.** Pact creates a PayPal order with `intent=AUTHORIZE`, the buyer approves it, and Pact authorizes it. The seller has committed funds to deliver against; the buyer has parted with nothing. PayPal requires that approval step, so Pact surfaces it rather than pretending a created order is a hold.
 3. **The seller produces the deliverable.**
 4. **An independent verifier checks it** against every acceptance criterion, recording per-criterion evidence. Deterministic checks and model judgement are combined with AND, so a confident-sounding but empty delivery cannot pass.
 5. **Settlement releases or returns.** Pass → `capture`, seller paid, reputation up. Fail → `void`, buyer charged nothing, reputation down.
@@ -38,7 +38,7 @@ Three decisions worth calling out:
 
 ## Challenges
 
-The hardest problem was not the integration, it was making the agents' incentives real. Our first version selected the cheapest offer, which meant the cheapest seller always won — and because we had built that seller to be unreliable, every single settlement failed verification and refunded. The demo was correct and useless.
+The hardest problem was not the integration, it was making the agents' incentives real. Our first version selected the cheapest offer, which meant the cheapest seller always won — and because we had built that seller to be unreliable, every single settlement failed verification and the hold was voided. The demo was correct and useless.
 
 The fix was to price risk instead of headline cost: seller selection divides price by trust score, so a seller with a bad record has to be substantially cheaper to compete. That one change is what makes the reputation ledger load-bearing, and it turned the demo into the actual thesis — watch the market route around the seller that fails, with no human involved.
 
@@ -46,11 +46,12 @@ The second challenge was guardrails. Models will happily agree to a price above 
 
 ## Accomplishments
 
-- A complete, working escrow lifecycle on real PayPal primitives: authorize → verify → capture or void.
+- A complete, working escrow lifecycle on real PayPal primitives: authorize → verify → capture or void, including the buyer-approval step PayPal requires before a hold can exist.
+- Payment invariants enforced in code and covered by tests: a hold is recorded only in a holdable state, settlement only on a `COMPLETED` capture, capture at most once under a lock, an unknown outcome marked `unresolved` for reconciliation instead of being retried, and a void re-read to confirm it landed.
 - An agent market that visibly self-corrects through reputation, demonstrated end to end.
 - A tamper-evident audit trail a finance team could actually reconcile against.
 - Runs with zero setup: no PayPal account or API key needed to see the whole thing work, but real sandbox settlement the moment credentials are added.
-- 25 tests covering the state machine, the budget guardrail, the settle-vs-refund branch, reputation feedback, and chain tamper detection.
+- 80 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app.
 
 ## What we learned
 

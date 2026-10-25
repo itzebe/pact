@@ -2,10 +2,22 @@ import { money, shortHash } from '../lib/api'
 
 const ESCROW_TONE = {
   none: { text: 'text-paper-faint', bg: 'bg-ink-800', ring: 'ring-ink-700', label: 'No escrow' },
+  awaiting_approval: {
+    text: 'text-held',
+    bg: 'bg-held-dim',
+    ring: 'ring-held/40',
+    label: 'Awaiting approval',
+  },
   held: { text: 'text-held', bg: 'bg-held-dim', ring: 'ring-held/40', label: 'Funds held' },
   released: { text: 'text-released', bg: 'bg-released-dim', ring: 'ring-released/40', label: 'Released' },
   voided: { text: 'text-voided', bg: 'bg-voided-dim', ring: 'ring-voided/40', label: 'Voided' },
   refunded: { text: 'text-voided', bg: 'bg-voided-dim', ring: 'ring-voided/40', label: 'Refunded' },
+  unresolved: {
+    text: 'text-held',
+    bg: 'bg-held-dim',
+    ring: 'ring-held/40',
+    label: 'Unresolved',
+  },
 }
 
 export function EscrowBadge({ state }) {
@@ -42,16 +54,19 @@ export function StatusPill({ status }) {
     open: 'bg-ink-800 text-paper-dim ring-ink-600',
     negotiating: 'bg-paypal-deep/40 text-paypal-bright ring-paypal/40',
     agreed: 'bg-paypal-deep/40 text-paypal-bright ring-paypal/40',
+    awaiting_approval: 'bg-held-dim text-held ring-held/40',
     escrowed: 'bg-held-dim text-held ring-held/40',
     delivered: 'bg-held-dim text-held ring-held/40',
     verifying: 'bg-held-dim text-held ring-held/40',
     settled: 'bg-released-dim text-released ring-released/40',
+    voided: 'bg-voided-dim text-voided ring-voided/40',
     refunded: 'bg-voided-dim text-voided ring-voided/40',
+    unresolved: 'bg-held-dim text-held ring-held/40',
     failed: 'bg-voided-dim text-voided ring-voided/40',
   }
   return (
     <span className={`chip ring-1 capitalize ${tones[status] ?? tones.open}`}>
-      {status}
+      {status.replace(/_/g, ' ')}
     </span>
   )
 }
@@ -91,9 +106,13 @@ const STEPS = [
 
 export function Lifecycle({ job }) {
   const kinds = new Set((job?.ledger ?? []).map((e) => e.kind))
-  const failed = job?.status === 'refunded' || job?.status === 'failed'
+  const status = job?.status
+  const failed = status === 'voided' || status === 'refunded' || status === 'failed'
+  // An unresolved settlement is neither a success nor a failure: the run stopped
+  // without a confirmed outcome, so the last step must not read as complete.
+  const unresolved = status === 'unresolved'
   const reachedIndex = STEPS.reduce((acc, s, i) => (s.kinds.some((k) => kinds.has(k)) ? i : acc), -1)
-  const done = job?.status === 'settled' || failed
+  const done = status === 'settled' || failed
 
   return (
     <ol className="flex flex-wrap items-center gap-1.5">
@@ -104,9 +123,11 @@ export function Lifecycle({ job }) {
           ? 'border-ink-700 text-paper-faint'
           : isLast && failed
             ? 'border-voided/50 bg-voided-dim text-voided'
-            : isLast && done
-              ? 'border-released/50 bg-released-dim text-released'
-              : 'border-paypal/40 bg-paypal-deep/30 text-paypal-bright'
+            : isLast && unresolved
+              ? 'border-held/50 bg-held-dim text-held'
+              : isLast && done
+                ? 'border-released/50 bg-released-dim text-released'
+                : 'border-paypal/40 bg-paypal-deep/30 text-paypal-bright'
         return (
           <li key={step.key} className="flex items-center gap-1.5">
             <span className={`chip border px-2 py-1 ${tone}`}>

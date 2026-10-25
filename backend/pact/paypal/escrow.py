@@ -2,18 +2,33 @@
 
 Pact needs *escrow* semantics: hold a buyer's funds, release them only when the
 deliverable passes verification, and return them untouched otherwise. PayPal
-exposes exactly those primitives through Orders v2 with ``intent=AUTHORIZE``:
+exposes those primitives through Orders v2 with ``intent=AUTHORIZE``:
 
-    create (intent=AUTHORIZE)  ->  authorize  ->  capture   (release)
-                                              \\->  void      (return)
+    create (intent=AUTHORIZE)  ->  buyer approves  ->  authorize  ->  capture (release)
+                                                                 \\->  void    (return)
 
-The published PayPal Agent Toolkit cannot express this: it hard-codes
-``"intent": "CAPTURE"`` in its order payload builder, so it can only do
-immediate payment. Settlement that is conditional on a verified outcome has to
-be built on the raw REST API, which is what this module does.
+Verified against PayPal's published OpenAPI specifications
+(``paypal/paypal-rest-api-specifications``):
 
-Every call is idempotent via ``PayPal-Request-Id`` so a retried request cannot
-double-charge a sandbox or live buyer.
+* ``checkout_payment_intent`` is ``['CAPTURE', 'AUTHORIZE']``, so ``AUTHORIZE``
+  is a supported intent rather than a guess.
+* ``authorization_status`` is
+  ``['CREATED', 'CAPTURED', 'DENIED', 'PARTIALLY_CAPTURED', 'VOIDED', 'PENDING']``.
+  There is no ``EXPIRED`` value: an expired hold simply stops being capturable.
+* ``capture_status`` is
+  ``['COMPLETED', 'DECLINED', 'PARTIALLY_REFUNDED', 'PENDING', 'REFUNDED', 'FAILED']``.
+  Only ``COMPLETED`` means money moved.
+* The authorize endpoint documents that "the buyer must first approve the order
+  or a valid payment_source must be provided in the request", so a caller that
+  skips approval cannot authorize. :func:`approval_url` surfaces the HATEOAS
+  ``approve`` link for that step.
+* Voiding is documented as impossible once a payment is fully captured, which is
+  why the capture and void paths are mutually exclusive.
+
+Every call is idempotent via ``PayPal-Request-Id``, so a retried request cannot
+double-charge a sandbox or live buyer. Transport failures raise
+:class:`AmbiguousOutcome` rather than a plain error, because a timeout does not
+prove the remote operation failed.
 """
 
 from __future__ import annotations
@@ -22,7 +37,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -42,9 +57,43 @@ class PayPalError(RuntimeError):
         self.code = code
 
 
+class AmbiguousOutcome(PayPalError):
+    """A request failed in a way that does not prove the remote operation failed.
+
+    A timeout, a dropped connection, or a 5xx response means the provider may or
+    may not have applied the operation. Callers must reconcile by querying the
+    provider rather than retrying blindly, because a retry can double-charge.
+    """
+
+    ambiguous = True
+
+
+# Authorization states that still permit a capture or a void, per the Payments v2
+# `authorization_status` enum (CREATED, CAPTURED, DENIED, PARTIALLY_CAPTURED,
+# VOIDED, PENDING). Anything else must not be treated as held funds.
+HOLDABLE_STATUSES = frozenset({"CREATED", "PENDING"})
+# Capture states that mean money actually moved, per the Payments v2
+# `capture_status` enum (COMPLETED, DECLINED, PARTIALLY_REFUNDED, PENDING,
+# REFUNDED, FAILED).
+SETTLED_CAPTURE_STATUSES = frozenset({"COMPLETED"})
+
+
 def money(amount: Decimal | float | int | str) -> str:
-    """Format a value as a PayPal amount string with exactly two decimals."""
-    return str(Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    """Format a value as a PayPal amount string with exactly two decimals.
+
+    Raises ``ValueError`` (not ``decimal.InvalidOperation``) for unusable input, so
+    a caller guarding with ``except ValueError`` cannot be surprised by an
+    unhandled decimal error.
+    """
+    try:
+        value = Decimal(str(amount))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"Not a valid amount: {amount!r}") from exc
+    try:
+        return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except InvalidOperation as exc:
+        # NaN or Infinity reach here.
+        raise ValueError(f"Not a finite amount: {amount!r}") from exc
 
 
 @dataclass
@@ -105,15 +154,18 @@ class PayPalEscrowClient:
             return self._token
 
         with httpx.Client(timeout=self._timeout) as client:
-            response = client.post(
-                f"{self.base_url}/v1/oauth2/token",
-                data={"grant_type": "client_credentials"},
-                auth=(self.client_id, self.client_secret),
-                headers={"Accept": "application/json"},
-            )
+            try:
+                response = client.post(
+                    f"{self.base_url}/v1/oauth2/token",
+                    data={"grant_type": "client_credentials"},
+                    auth=(self.client_id, self.client_secret),
+                    headers={"Accept": "application/json"},
+                )
+            except httpx.HTTPError as exc:
+                raise PayPalError("Could not reach PayPal to obtain an access token", code="TRANSPORT_ERROR") from exc
         if response.status_code != 200:
             raise PayPalError(
-                "Could not obtain a PayPal access token",
+                "Could not obtain a PayPal access token (check PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET)",
                 status=response.status_code,
                 body=_safe_json(response),
             )
@@ -131,8 +183,29 @@ class PayPalEscrowClient:
         if idempotency_key:
             headers["PayPal-Request-Id"] = idempotency_key
 
-        with httpx.Client(timeout=self._timeout) as client:
-            response = client.request(method, f"{self.base_url}{path}", headers=headers, json=json_body)
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                response = client.request(method, f"{self.base_url}{path}", headers=headers, json=json_body)
+        except httpx.TimeoutException as exc:
+            # The request may still have been applied remotely. Never report this
+            # as a definite failure, and never retry it blindly.
+            raise AmbiguousOutcome(
+                f"PayPal request to {path} timed out; the remote outcome is unknown",
+                code="TIMEOUT",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise AmbiguousOutcome(
+                f"PayPal request to {path} failed at the transport layer; the remote outcome is unknown",
+                code="TRANSPORT_ERROR",
+            ) from exc
+
+        # A 5xx can also mean the operation was applied before the failure.
+        if response.status_code >= 500:
+            raise AmbiguousOutcome(
+                f"PayPal returned HTTP {response.status_code} for {path}; the remote outcome is unknown",
+                status=response.status_code,
+                code="PROVIDER_ERROR",
+            )
 
         body = _safe_json(response)
         if response.status_code >= 400:
@@ -261,6 +334,18 @@ class PayPalEscrowClient:
     def get_authorization(self, authorization_id: str) -> Authorization:
         return _parse_authorization(self._request("GET", f"/v2/payments/authorizations/{authorization_id}"))
 
+    def get_capture(self, capture_id: str) -> Capture:
+        """Fetch a capture's real status, for reconciling an ambiguous outcome."""
+        body = self._request("GET", f"/v2/payments/captures/{capture_id}")
+        amount = body.get("amount") or {}
+        return Capture(
+            id=body.get("id", capture_id),
+            status=body.get("status", ""),
+            amount=str(amount.get("value", "")),
+            currency=str(amount.get("currency_code", "")),
+            raw=body,
+        )
+
 
 def _safe_json(response: httpx.Response) -> Any:
     try:
@@ -270,25 +355,42 @@ def _safe_json(response: httpx.Response) -> Any:
 
 
 def _error_code(body: Any) -> str | None:
+    """Return the most specific error code PayPal supplied.
+
+    ``details[0].issue`` names the actual cause (``ORDER_NOT_APPROVED``,
+    ``AUTHORIZATION_ALREADY_CAPTURED``); ``name`` is only the HTTP-level category
+    (``UNPROCESSABLE_ENTITY``). The specific one is what a caller can act on, so it
+    wins when present.
+    """
     if isinstance(body, dict):
-        if body.get("name"):
-            return str(body["name"])
         details = body.get("details")
         if isinstance(details, list) and details and isinstance(details[0], dict):
-            return details[0].get("issue")
+            issue = details[0].get("issue")
+            if issue:
+                return str(issue)
+        if body.get("name"):
+            return str(body["name"])
     return None
 
 
 def _describe_error(response: httpx.Response, body: Any) -> str:
+    """Build a message that keeps the specific cause, not just the HTTP category.
+
+    PayPal's top-level ``message`` is generic ("The requested action could not be
+    performed."), while ``details[].description`` names the real cause. Both are
+    kept so a log line is actionable.
+    """
     name = _error_code(body) or f"HTTP {response.status_code}"
-    detail = ""
+    parts: list[str] = []
     if isinstance(body, dict):
-        detail = str(body.get("message", ""))
+        if body.get("message"):
+            parts.append(str(body["message"]))
         details = body.get("details")
-        if isinstance(details, list) and details:
-            issues = [d.get("issue", "") for d in details if isinstance(d, dict)]
-            description = [d.get("description", "") for d in details if isinstance(d, dict)]
-            detail = detail or "; ".join(filter(None, issues + description))
+        if isinstance(details, list):
+            for d in details:
+                if isinstance(d, dict) and d.get("description"):
+                    parts.append(str(d["description"]))
+    detail = " ".join(parts)
     return f"PayPal error {name}: {detail}".strip()
 
 
@@ -309,3 +411,20 @@ def _parse_authorization(body: dict) -> Authorization:
         expires_at=node.get("expiration_time"),
         raw=body,
     )
+
+
+def approval_url(order: dict) -> str | None:
+    """Return the buyer-approval URL from a created order's HATEOAS links.
+
+    PayPal requires the buyer to approve an order before it can be authorized
+    (unless a valid ``payment_source`` is supplied in the request). The
+    ``rel:approve`` link is where the buyer is sent to do that, so a caller that
+    cannot obtain approval must not proceed to authorize.
+    """
+    for link in order.get("links") or []:
+        if not isinstance(link, dict):
+            continue
+        rel = str(link.get("rel", ""))
+        if rel in {"approve", "payer-action"} and link.get("href"):
+            return str(link["href"])
+    return None

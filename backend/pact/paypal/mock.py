@@ -22,9 +22,16 @@ from .escrow import Authorization, Capture, PayPalError, money
 
 
 class MockPayPalEscrowClient:
-    """Same surface as the real client, backed by a dict."""
+    """Same surface as the real client, backed by a dict.
+
+    ``auto_approves`` is True because there is no browser in a headless demo: the
+    double stands in for a buyer who has already approved the order. The real
+    client does not set it, so the approval step is exercised only where it is
+    real.
+    """
 
     environment = "mock"
+    auto_approves = True
 
     def __init__(self) -> None:
         self._orders: dict[str, dict[str, Any]] = {}
@@ -45,6 +52,10 @@ class MockPayPalEscrowClient:
             "status": "CREATED",
             "intent": "AUTHORIZE",
             "mock": True,
+            "links": [
+                {"rel": "self", "href": f"https://api-m.sandbox.paypal.com/v2/checkout/orders/{order_id}"},
+                {"rel": "approve", "href": f"https://www.sandbox.paypal.com/checkoutnow?token={order_id}"},
+            ],
             "purchase_units": [
                 {
                     "reference_id": reference_id or "default",
@@ -149,6 +160,18 @@ class MockPayPalEscrowClient:
         if order is None:
             raise PayPalError(f"Unknown order {order_id}", code="RESOURCE_NOT_FOUND")
         return order
+
+    def get_capture(self, capture_id: str) -> Capture:
+        capture = self._captures.get(capture_id)
+        if capture is None:
+            raise PayPalError(f"Unknown capture {capture_id}", code="RESOURCE_NOT_FOUND")
+        return Capture(
+            id=capture["id"],
+            status=capture["status"],
+            amount=capture["amount"]["value"],
+            currency=capture["amount"]["currency_code"],
+            raw=capture,
+        )
 
     def get_authorization(self, authorization_id: str) -> Authorization:
         record = self._authorizations.get(authorization_id)

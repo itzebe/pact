@@ -114,6 +114,22 @@ export default function App() {
     [refreshLists],
   )
 
+  const approve = useCallback(async () => {
+    if (!job) return
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await api.approveJob(job.id)
+      setJob(updated)
+      setLiveEntries(updated.ledger ?? [])
+      await refreshLists()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }, [job, refreshLists])
+
   const viewJob = useMemo(
     () => (job ? { ...job, ledger: liveEntries.length ? liveEntries : job.ledger } : null),
     [job, liveEntries],
@@ -129,6 +145,47 @@ export default function App() {
       <Header health={health} live={live} />
 
       <main className="mx-auto max-w-[1500px] px-5 py-6">
+        {job?.escrow?.state === 'awaiting_approval' && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
+            <div>
+              <div className="text-sm font-medium text-held">Buyer approval required</div>
+              <div className="mt-0.5 text-xs text-paper-dim">
+                PayPal will not authorize this order until the buyer approves it. Nothing is held
+                and no work is produced until then.
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {job.escrow.approval_url && (
+                <a
+                  href={job.escrow.approval_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="chip ring-1 bg-ink-800 text-paper-dim ring-ink-600 hover:text-paper"
+                >
+                  Open PayPal approval
+                </a>
+              )}
+              <button
+                onClick={approve}
+                disabled={busy}
+                className="chip ring-1 bg-paypal-deep/50 text-paypal-bright ring-paypal/40 disabled:opacity-50"
+              >
+                {busy ? 'Continuing…' : 'I approved — continue'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {job?.status === 'unresolved' && (
+          <div className="mb-5 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
+            <div className="text-sm font-medium text-held">Settlement unresolved</div>
+            <div className="mt-0.5 text-xs text-paper-dim">
+              PayPal did not confirm a terminal outcome, so Pact has recorded neither a release nor
+              a return. This needs reconciliation rather than a retry — a retry could capture twice.
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-voided/40 bg-voided-dim/40 px-4 py-3">
             <div>
@@ -308,7 +365,13 @@ function JobHeader({ job }) {
           tone={job.verification ? (job.verification.passed ? 'text-released' : 'text-voided') : 'text-paper-faint'}
         />
         <Stat
-          label={job.escrow?.state === 'released' ? 'Released to seller' : 'Held / returned'}
+          label={
+            job.escrow?.state === 'released'
+              ? 'Released to seller'
+              : job.escrow?.state === 'unresolved'
+                ? 'Outcome unresolved'
+                : 'Held / returned'
+          }
           value={
             job.escrow?.state === 'released'
               ? money(job.escrow.amount, job.escrow.currency)
@@ -321,7 +384,11 @@ function JobHeader({ job }) {
               ? 'buyer charged nothing'
               : job.escrow?.state === 'released'
                 ? 'captured from escrow'
-                : 'in escrow'
+                : job.escrow?.state === 'unresolved'
+                  ? 'needs reconciliation'
+                  : job.escrow?.state === 'awaiting_approval'
+                    ? 'not yet authorized'
+                    : 'in escrow'
           }
           tone={
             job.escrow?.state === 'released'

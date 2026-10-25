@@ -37,7 +37,7 @@ export default function Reputation({ agents, onPickSeller }) {
           <div className="min-w-0">
             <div className="truncate text-xs text-paper">{a.agent_id}</div>
             <div className="mt-0.5 text-2xs text-paper-faint tnum">
-              {a.settled} settled · {a.refunded} refunded
+              {a.settled} settled · {a.voided} voided
               {a.volume > 0 && ` · ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(a.volume)}`}
             </div>
           </div>

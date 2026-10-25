@@ -19,6 +19,8 @@ Every serious "trust layer for agents" effort today — Circle, BNB Chain, ERC-8
 
 PayPal already provides the exact primitive this needs. Orders v2 supports `intent=AUTHORIZE`, which **reserves** funds rather than taking them, and then offers a genuine two-way branch: `capture` to release, or `void` to return. That is escrow, and it works in the sandbox. Pact builds the missing protocol on top of it.
 
+One detail that shapes the whole design: PayPal will not authorize an order until the buyer approves it (or a `payment_source` is supplied inline). Pact does not skip that step — it surfaces the order's `rel:approve` link, stops before any work is produced, and only continues once the buyer has approved. Funds are never claimed to be held on the strength of a created order.
+
 ---
 
 ## What it does
@@ -26,12 +28,23 @@ PayPal already provides the exact primitive this needs. Orders v2 supports `inte
 A buyer posts a job with a brief, a set of acceptance criteria, and a hard budget ceiling. Then:
 
 1. **Seller agents compete.** Each quotes, the buyer counters, and the price converges over rounds. The budget is enforced in code, not requested of the model — an out-of-budget agreement is rejected by the engine regardless of what the LLM returns.
-2. **Funds are held before work starts.** Pact creates a PayPal order with `intent=AUTHORIZE` and authorizes it. The seller now has committed funds to deliver against; the buyer has parted with nothing.
+2. **Funds are held before work starts.** Pact creates a PayPal order with `intent=AUTHORIZE`, the buyer approves it, and Pact authorizes it. The seller now has committed funds to deliver against; the buyer has parted with nothing. Nothing is delivered until the hold is confirmed by PayPal.
 3. **The seller produces the deliverable** it was contracted for.
 4. **An independent verifier checks it** against each acceptance criterion, with per-criterion evidence recorded. Deterministic checks (artifact present, no evasion markers) are combined with model judgement. A pass requires both.
 5. **Settlement releases or returns.** Pass → `capture`, and the seller's reputation improves. Fail → `void`, the buyer is charged nothing, and the seller's reputation drops.
 
 The reputation score then **feeds back into seller selection**: a seller with a poor verified-delivery record must be materially cheaper to win the next job. So the market routes around unreliable sellers on its own — reputation is an economic force here, not a dashboard number.
+
+### The payment invariants
+
+These are the guarantees that protect real money, and each is covered by a test:
+
+- **Held means held.** A hold is recorded only when PayPal reports the authorization in a holdable state. `DENIED` is a failure; an authorization that is already `CAPTURED` is flagged for reconciliation, never treated as a success.
+- **Settled means paid.** A job is recorded as settled only when the capture status is `COMPLETED`. `PENDING`, `FAILED` and `DECLINED` are not settlement.
+- **Captured at most once.** Settlement is serialised behind a lock and claims the authorization before the call, so concurrent requests cannot produce a duplicate capture. A second attempt is refused.
+- **An unknown outcome is not a failure.** A timeout, a dropped connection, or a 5xx leaves the job `unresolved` and asks a human to reconcile. It is never retried automatically, because a blind retry is how double-charges happen.
+- **A void is confirmed.** After voiding, Pact re-reads the authorization and records whether PayPal confirmed it.
+- **No capture without a passing verdict.** A failed or inconclusive verification never reaches the capture call.
 
 ---
 
@@ -68,7 +81,7 @@ cd backend && source .venv/bin/activate
 python -m pytest tests/ -q
 ```
 
-25 tests covering the escrow state machine, the budget guardrail, the settle-vs-refund branch, reputation feedback, and hash-chain tamper detection.
+80 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, the budget guardrail, reputation feedback, the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
 
 ---
 
@@ -100,6 +113,10 @@ PAYPAL_ENVIRONMENT=sandbox
 ```
 
 4. Restart the backend. The UI badge switches from **Simulated PayPal** to **PayPal Sandbox**, and every settlement creates real objects on `api-m.sandbox.paypal.com`.
+
+5. Run a job. Because PayPal requires the buyer to approve an order before it can be authorized, the run stops at **Buyer approval required** and shows the order's approval link. Open it, approve with a sandbox buyer account, then click **I approved — continue**. Pact authorizes the order, produces and verifies the delivery, and settles.
+
+In simulated mode there is no buyer to click, so the double auto-approves and the whole lifecycle runs in one request. That is the only difference between the two paths — the state machine, the guards, and the ledger are the same code.
 
 You can verify the money movement in the sandbox merchant account's Activity page — a captured authorization shows up as a completed payment, and a voided one does not.
 
@@ -134,9 +151,19 @@ backend/pact/
 
 ### Why the escrow client is hand-written
 
-PayPal publishes an official **Agent Toolkit**, and Pact could have used it. It cannot express this product. The toolkit hard-codes `"intent": "CAPTURE"` in its order payload builder, so it only does immediate payment — there is no authorize, no void, and therefore no way to make settlement conditional on an outcome. Escrow required building directly on the REST API.
+PayPal publishes an official **Agent Toolkit**, and Pact could have used it. It cannot express this product. The toolkit hard-codes `"intent": "CAPTURE"` in its order payload builder (`python/paypal_agent_toolkit/shared/orders/payload_util.py`), so it only does immediate payment — there is no authorize call, no void, and therefore no way to make settlement conditional on an outcome. Escrow required building directly on the REST API.
 
 Every call is idempotent via `PayPal-Request-Id`, so a retried request cannot double-charge.
+
+The client's behaviour is pinned to PayPal's published OpenAPI specifications, and the test suite asserts against those enum values rather than against assumptions:
+
+| Fact | Source |
+|---|---|
+| `intent` is `CAPTURE` or `AUTHORIZE` | `checkout_payment_intent` |
+| Authorization states are `CREATED, CAPTURED, DENIED, PARTIALLY_CAPTURED, VOIDED, PENDING` | `authorization_status` |
+| Capture states are `COMPLETED, DECLINED, PARTIALLY_REFUNDED, PENDING, REFUNDED, FAILED` | `capture_status` |
+| The buyer must approve before authorization | Orders v2 authorize endpoint |
+| A fully captured payment cannot be voided | Payments v2 void endpoint |
 
 ### The audit ledger
 

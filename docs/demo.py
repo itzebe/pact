@@ -139,7 +139,7 @@ def main() -> int:
             bar = f"{colour}{'█' * bar_width}{DIM}{'░' * (20 - bar_width)}{RESET}"
             print(
                 f"  {row['agent_id']:<14} {bar} {row['score']:.2f}   "
-                f"{DIM}{row['settled']} settled · {row['refunded']} refunded{RESET}"
+                f"{DIM}{row['settled']} settled · {row['voided']} voided{RESET}"
             )
 
         total = len(last.ledger)

@@ -92,13 +92,17 @@ def test_successful_delivery_releases_escrow(engine):
 
 
 def test_failed_delivery_voids_the_hold_and_charges_nothing(engine):
-    """The refund path is the reason escrow is used instead of immediate capture."""
+    """The refund path is the reason escrow is used instead of immediate capture.
+
+    The job ends ``voided``, not ``refunded``: a void releases the hold and moves
+    no money, so nothing was ever captured that could be refunded.
+    """
     job = make_job(engine)
     result = engine.run(job, seller_ids=["seller_quill"])
     assert result.verification.passed is False
     assert result.escrow.state is EscrowState.VOIDED
     assert result.escrow.capture_id == "", "a voided hold must never produce a capture"
-    assert result.status is JobStatus.REFUNDED
+    assert result.status is JobStatus.VOIDED
 
 
 def test_escrow_is_held_before_the_deliverable_exists(engine):
@@ -118,8 +122,8 @@ def test_reputation_records_settlement_and_refund(engine):
 
     nova = engine.reputation.get("seller_nova")
     quill = engine.reputation.get("seller_quill")
-    assert nova["settled"] == 1 and nova["refunded"] == 0
-    assert quill["refunded"] == 1 and quill["settled"] == 0
+    assert nova["settled"] == 1 and nova["voided"] == 0
+    assert quill["voided"] == 1 and quill["settled"] == 0
     assert nova["score"] > quill["score"]
 
 

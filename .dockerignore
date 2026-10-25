@@ -1,0 +1,18 @@
+# Host build artefacts and runtime state must never enter the image: they bloat it
+# and, for node_modules/.venv, can shadow the container's own platform binaries.
+**/node_modules
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.vite
+frontend/dist
+data
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+docs
+*.md
