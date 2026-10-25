@@ -86,11 +86,66 @@ def test_create_order_requests_authorize_intent(client, transport):
 
 def test_approval_url_is_returned_for_a_real_order(client, transport):
     transport.set("POST", "/v2/checkout/orders", 201, {
-        "id": "ORDER-2", "status": "CREATED",
-        "links": [{"rel": "approve", "href": "https://www.sandbox.paypal.com/checkoutnow?token=ORDER-2"}],
+        "id": "ORDER-2", "status": "PAYER_ACTION_REQUIRED",
+        "links": [{"rel": "payer-action", "href": "https://www.sandbox.paypal.com/checkoutnow?token=ORDER-2"}],
     })
     order = client.create_order(amount=Decimal("10.00"))
     assert approval_url(order) == "https://www.sandbox.paypal.com/checkoutnow?token=ORDER-2"
+
+
+def test_create_order_sends_payment_source_at_order_level(client, transport):
+    """The buyer-approval link only exists if ``payment_source`` is sent.
+
+    PayPal ignores ``payment_source`` nested inside a purchase unit and falls
+    back to the legacy ``CREATED``/``rel:approve`` order, whose checkout page
+    cannot render the redirect flow. Without this field at the order level the
+    buyer gets "Things don't appear to be working at the moment".
+    """
+    transport.set("POST", "/v2/checkout/orders", 201, {"id": "ORDER-3", "status": "PAYER_ACTION_REQUIRED"})
+    client.create_order(
+        amount=Decimal("300.00"),
+        currency="USD",
+        return_url="https://pact.example/api/paypal/return",
+        cancel_url="https://pact.example/api/paypal/cancel",
+    )
+
+    payload = json.loads(next(r for r in transport.requests if r.url.path == "/v2/checkout/orders").content)
+    assert payload["payment_source"]["paypal"]["experience_context"]["return_url"] == (
+        "https://pact.example/api/paypal/return"
+    )
+    assert payload["payment_source"]["paypal"]["experience_context"]["cancel_url"] == (
+        "https://pact.example/api/paypal/cancel"
+    )
+    assert "payment_source" not in payload["purchase_units"][0], (
+        "payment_source is an order-level field; PayPal ignores it inside a purchase unit"
+    )
+
+
+def test_create_order_omits_placeholder_return_urls(client, transport):
+    """A caller that supplies no URLs must not get fabricated example.com ones."""
+    transport.set("POST", "/v2/checkout/orders", 201, {"id": "ORDER-4", "status": "PAYER_ACTION_REQUIRED"})
+    client.create_order(amount=Decimal("5.00"))
+
+    payload = json.loads(next(r for r in transport.requests if r.url.path == "/v2/checkout/orders").content)
+    context = payload["payment_source"]["paypal"]["experience_context"]
+    assert "return_url" not in context
+    assert "cancel_url" not in context
+
+
+def test_create_order_asks_for_an_immediately_authorizable_method(client, transport):
+    """Escrow holds funds at approval time, so the buyer must fund instantly.
+
+    An eCheck could be approved but not authorized, which would strand the job
+    after the buyer believes they have paid.
+    """
+    transport.set("POST", "/v2/checkout/orders", 201, {"id": "ORDER-5", "status": "PAYER_ACTION_REQUIRED"})
+    client.create_order(amount=Decimal("42.00"))
+
+    payload = json.loads(next(r for r in transport.requests if r.url.path == "/v2/checkout/orders").content)
+    context = payload["payment_source"]["paypal"]["experience_context"]
+    assert context["payment_method_preference"] == "IMMEDIATE_PAYMENT_REQUIRED"
+    assert context["user_action"] == "PAY_NOW"
+    assert context["shipping_preference"] == "NO_SHIPPING"
 
 
 def test_authorize_parses_the_nested_authorization(client, transport):

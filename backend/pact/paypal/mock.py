@@ -49,12 +49,12 @@ class MockPayPalEscrowClient:
         order_id = f"MOCK-ORDER-{uuid.uuid4().hex[:12].upper()}"
         order = {
             "id": order_id,
-            "status": "CREATED",
+            "status": "PAYER_ACTION_REQUIRED",
             "intent": "AUTHORIZE",
             "mock": True,
             "links": [
                 {"rel": "self", "href": f"https://api-m.sandbox.paypal.com/v2/checkout/orders/{order_id}"},
-                {"rel": "approve", "href": f"https://www.sandbox.paypal.com/checkoutnow?token={order_id}"},
+                {"rel": "payer-action", "href": f"https://www.sandbox.paypal.com/checkoutnow?token={order_id}"},
             ],
             "purchase_units": [
                 {
