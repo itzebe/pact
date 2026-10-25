@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, AsyncIterator
 
@@ -21,6 +22,7 @@ from ..config import settings
 from ..core.engine import JobAlreadyRunning, engine
 from ..core.models import EscrowState, Job
 from ..core.negotiation import default_seller_ids
+from ..paypal import MockPayPalEscrowClient, PayPalError, approval_url
 
 log = logging.getLogger("pact.api")
 
@@ -182,6 +184,64 @@ async def reconcile_job(job_id: str) -> dict[str, Any]:
         )
     reconciled = await asyncio.to_thread(engine.reconcile_job, job)
     return _job_full(reconciled)
+
+
+_EMAIL = re.compile(r"([^@\s]{1,64})@([^@\s]+\.[A-Za-z]{2,})")
+
+
+def _redact(value: Any) -> Any:
+    """Mask email local parts anywhere in a provider payload.
+
+    Order details are useful for diagnosing a stuck approval, but the merchant and
+    payer identities in them are not ours to republish. Keeping the domain (which
+    distinguishes sandbox from live) and dropping the mailbox is enough.
+    """
+    if isinstance(value, str):
+        return _EMAIL.sub(lambda m: f"{m.group(1)[:1]}***@{m.group(2)}", value)
+    if isinstance(value, dict):
+        return {k: _redact(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    return value
+
+
+@router.get("/jobs/{job_id}/paypal-order")
+async def get_paypal_order(job_id: str) -> dict[str, Any]:
+    """Read the live PayPal order behind a job. Read-only; moves no money.
+
+    Exists so a stuck buyer approval can be diagnosed from the provider's own
+    record (status, intent, amount, payee) instead of inferring it from the
+    approval link. Identity fields are redacted.
+    """
+    job = _job_or_404(job_id)
+    if not job.escrow.order_id:
+        raise HTTPException(status_code=409, detail="Job has no PayPal order")
+    if isinstance(engine.escrow, MockPayPalEscrowClient):
+        raise HTTPException(
+            status_code=409,
+            detail="Order details require a real PayPal client; this deployment is simulated",
+        )
+    try:
+        order = await asyncio.to_thread(engine.escrow.get_order, job.escrow.order_id)
+    except PayPalError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"provider_error": exc.code or "PAYPAL_ERROR", "message": str(exc)[:300]},
+        ) from exc
+
+    order = order if isinstance(order, dict) else {}
+    live_url = approval_url(order)
+    return {
+        "job_id": job.id,
+        "order_id": job.escrow.order_id,
+        "environment": getattr(engine.escrow, "environment", ""),
+        "intent": order.get("intent"),
+        "status": order.get("status"),
+        "purchase_units": _redact(order.get("purchase_units") or []),
+        "approval_url": live_url,
+        "approval_url_matches_stored": bool(live_url) and live_url == job.escrow.approval_url,
+        "links": [{"rel": link.get("rel")} for link in (order.get("links") or []) if isinstance(link, dict)],
+    }
 
 
 @router.get("/jobs/{job_id}")
