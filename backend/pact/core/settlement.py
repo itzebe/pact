@@ -265,8 +265,8 @@ class SettlementEngine:
         """Whether this backend needs an interactive buyer-approval step.
 
         The in-memory double auto-approves so the demo runs with no setup; a real
-        PayPal order returns a ``rel:approve`` link and cannot be authorized until
-        the buyer visits it.
+        PayPal order returns a ``rel:payer-action`` link and cannot be authorized
+        until the buyer visits it.
         """
         return not bool(getattr(self.escrow, "auto_approves", False))
 

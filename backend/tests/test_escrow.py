@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 
 from pact.paypal import MockPayPalEscrowClient
-from pact.paypal.escrow import PayPalError
+from pact.paypal.escrow import PayPalError, approval_url
 
 
 @pytest.fixture()
@@ -24,8 +24,11 @@ def test_create_order_reserves_funds_rather_than_charging(escrow):
     """The order must be an AUTHORIZE order, not an immediate capture."""
     order = escrow.create_order(amount=Decimal("120.00"), description="test")
     assert order["intent"] == "AUTHORIZE"
-    assert order["status"] == "CREATED"
+    # A real PayPal order that needs buyer approval comes back
+    # PAYER_ACTION_REQUIRED with a rel:payer-action link; the double mirrors it.
+    assert order["status"] == "PAYER_ACTION_REQUIRED"
     assert order["purchase_units"][0]["amount"]["value"] == "120.00"
+    assert approval_url(order) == f"https://www.sandbox.paypal.com/checkoutnow?token={order['id']}"
 
 
 def test_authorize_places_a_hold(escrow):

@@ -241,22 +241,35 @@ class PayPalEscrowClient:
             purchase_unit["reference_id"] = reference_id
         if custom_id:
             purchase_unit["custom_id"] = custom_id
-        if return_url or cancel_url:
-            purchase_unit["payment_source"] = {
-                "paypal": {
-                    "experience_context": {
-                        "return_url": return_url or "https://example.com/return",
-                        "cancel_url": cancel_url or "https://example.com/cancel",
-                        "user_action": "PAY_NOW",
-                        "shipping_preference": "NO_SHIPPING",
-                    }
-                }
-            }
+
+        # ``payment_source`` is an order-level field. PayPal ignores it inside a
+        # purchase unit, and without it a redirect flow gets the legacy
+        # ``CREATED``/``rel:approve`` order that its checkout page cannot render —
+        # the buyer sees "Things don't appear to be working at the moment".
+        # Sending it here makes PayPal return the ``PAYER_ACTION_REQUIRED`` order
+        # with the ``rel:payer-action`` link this flow hands to the buyer.
+        experience_context: dict[str, Any] = {
+            "user_action": "PAY_NOW",
+            "shipping_preference": "NO_SHIPPING",
+            # Escrow must place a hold at approval time, so the buyer needs an
+            # instantly authorizable method (an eCheck could be approved but not
+            # authorized). Mirrors PayPal's documented AUTHORIZE example.
+            "payment_method_preference": "IMMEDIATE_PAYMENT_REQUIRED",
+            "landing_page": "LOGIN",
+        }
+        if return_url:
+            experience_context["return_url"] = return_url
+        if cancel_url:
+            experience_context["cancel_url"] = cancel_url
 
         return self._request(
             "POST",
             "/v2/checkout/orders",
-            json_body={"intent": "AUTHORIZE", "purchase_units": [purchase_unit]},
+            json_body={
+                "intent": "AUTHORIZE",
+                "purchase_units": [purchase_unit],
+                "payment_source": {"paypal": {"experience_context": experience_context}},
+            },
             idempotency_key=idempotency_key or f"pact-order-{uuid.uuid4()}",
         )
 
