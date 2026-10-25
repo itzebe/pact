@@ -536,3 +536,48 @@ def test_reconciled_settlement_credits_reputation_on_the_db_path(clean_db):
     assert record["failed"] == 0, "the reversal must persist, not just live in memory"
     assert record["settled"] == 1
     assert record["volume"] == 120.0
+
+
+def test_concurrent_first_settlements_do_not_lose_reputation_increments(clean_db):
+    """Concurrent increments for a *brand new* agent must all be counted.
+
+    This is the case ``SELECT ... FOR UPDATE`` cannot protect: when the agent has no
+    reputation row yet, the SELECT locks nothing, so concurrent first settlements
+    all read a blank record and overwrite each other. With 12 workers racing to
+    create the row, every increment must still land.
+
+    A separate ledger per worker stands in for a separate instance.
+    """
+    import threading
+
+    from pact.core.dbstore import PostgresReputationLedger
+
+    agent = "seller_brand_new"
+    workers = 12
+    with PostgresJobStore(DATABASE_URL)._connect() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM reputation WHERE agent_id = %s", (agent,))
+
+    start = threading.Barrier(workers)
+    errors: list[Exception] = []
+
+    def bump():
+        ledger = PostgresReputationLedger(DATABASE_URL)
+        try:
+            start.wait(timeout=30)
+            ledger.record_settled(agent, 10.0)
+        except Exception as exc:  # recorded, asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=bump) for _ in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    assert not errors, f"concurrent increments raised: {errors}"
+    record = PostgresReputationLedger(DATABASE_URL).get(agent)
+    assert record["settled"] == workers, (
+        f"lost {workers - record['settled']} of {workers} increments; "
+        f"a row lock that only works on existing rows is not a lock"
+    )
+    assert record["volume"] == workers * 10.0

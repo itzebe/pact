@@ -243,23 +243,40 @@ class PostgresReputationLedger:
         }
 
     def _mutate(self, agent_id: str, apply) -> dict:
-        """Read-modify-write one agent under a row lock.
+        """Read-modify-write one agent atomically, across instances.
 
         Concurrent settlements for the same agent must not lose an increment, so
-        the row is selected FOR UPDATE and the counters are recomputed in Python
-        from the locked copy.
+        the counters are recomputed in Python from a locked copy of the row.
+
+        Two things are load-bearing here, and getting either wrong loses updates
+        silently:
+
+        1. ``SELECT ... FOR UPDATE`` is not enough on its own. It locks an existing
+           row, but when the agent is new the row does not exist yet, so it locks
+           *nothing* and concurrent first settlements of a new agent all read a
+           blank record and overwrite each other. The ``INSERT ... ON CONFLICT``
+           below establishes the row and returns it under a lock in one statement,
+           whether or not it already existed.
+        2. These connections are ``autocommit=True``, so without an explicit
+           transaction the row lock would be released the moment that statement
+           ended — before the write. ``conn.transaction()`` opens a real
+           BEGIN/COMMIT that spans the lock, the mutation, and the write.
         """
         with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT doc FROM reputation WHERE agent_id = %s FOR UPDATE",
-                    (agent_id,),
-                )
-                row = cur.fetchone()
-            record = row[0] if row else self._blank(agent_id)
-            apply(record)
-            self._write(conn, record)
-            return dict(record)
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO reputation (agent_id, doc) VALUES (%s, %s)
+                        ON CONFLICT (agent_id) DO UPDATE SET doc = reputation.doc
+                        RETURNING doc
+                        """,
+                        (agent_id, self._jsonb(self._blank(agent_id))),
+                    )
+                    record = cur.fetchone()[0]
+                apply(record)
+                self._write(conn, record)
+                return dict(record)
 
     def record_settled(self, agent_id: str, amount: float) -> dict:
         def apply(record: dict) -> None:
