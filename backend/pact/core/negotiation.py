@@ -126,12 +126,20 @@ class NegotiationEngine:
         as soon as at least one offer has been accepted, so a seller cannot keep
         undercutting after the buyer has already agreed. Selection among the
         accepted offers is left to the caller, which can weigh more than price.
+
+        The buyer model is not trusted to close the deal. If the rounds run out
+        with no acceptance, the engine itself accepts every seller's latest quote
+        that is within budget, so an affordable job cannot fail merely because the
+        model never said the word. Quotes above budget are never accepted.
         """
         accepted: list[Offer] = []
         committed: set[str] = set()
         last_counter: dict[str, Decimal] = {}
+        latest: dict[str, Offer] = {}
+        rounds_run = 0
 
         for round_no in range(1, self.max_rounds + 1):
+            rounds_run = round_no
             for seller_id in seller_ids:
                 if seller_id in committed:
                     continue
@@ -142,6 +150,7 @@ class NegotiationEngine:
                     continue
 
                 job.offers.append(offer)
+                latest[seller_id] = offer
                 job.messages.append(
                     Message(
                         round=round_no,
@@ -214,8 +223,43 @@ class NegotiationEngine:
             if accepted:
                 break
 
-        if not accepted:
-            return []
+        if accepted:
+            return accepted
+
+        # Convergence guarantee. A real model does not always emit accept=true,
+        # even when every quote is comfortably inside budget — it keeps countering,
+        # or its final-round call fails outright. Leaving the close entirely to the
+        # model makes an affordable job fail, which is the opposite of what the
+        # budget ceiling means. So when the rounds run out with no acceptance, the
+        # engine closes on each seller's latest in-budget quote, exactly mirroring
+        # the buyer policy the deterministic agent already encodes. The budget
+        # ceiling is still absolute: a quote above it is never accepted, so a job
+        # whose every quote exceeds the budget still fails (and moves no money).
+        # Selection among these offers is still the caller's, on risk-adjusted cost.
+        for seller_id, offer in latest.items():
+            if seller_id in committed or offer.price > job.budget_max:
+                continue
+            accepted.append(offer)
+            rationale = "Rounds exhausted; accepting the latest quote because it is within budget."
+            job.messages.append(
+                Message(
+                    round=rounds_run,
+                    role="buyer",
+                    agent_id=job.buyer_id,
+                    text=f"Accepted at {job.currency} {offer.price:.2f}",
+                    offer=offer.price,
+                    rationale=rationale,
+                )
+            )
+            job.append(
+                "acceptance",
+                job.buyer_id,
+                f"Accepted {seller_id} at {job.currency} {offer.price:.2f}",
+                price=float(offer.price),
+                round=rounds_run,
+                rationale=rationale,
+            )
+
         return accepted
 
     @staticmethod

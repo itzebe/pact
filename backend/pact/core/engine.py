@@ -109,7 +109,19 @@ class PactEngine:
         winning = self.negotiation.select_winner(accepted, score_of)
         if winning is None:
             job.status = JobStatus.FAILED
-            job.append("negotiation_failed", "pact", "No seller produced an offer within budget")
+            # The summary must reflect what actually happened. Claiming the budget
+            # was too small when every quote fit is what sent the last investigation
+            # down the wrong path: "no affordable quote" and "no quote at all" are
+            # different conditions and only one of them is about price.
+            if not job.offers:
+                summary = "No seller produced an offer"
+            else:
+                cheapest = min(o.price for o in job.offers)
+                summary = (
+                    f"No seller quoted within budget: cheapest was "
+                    f"{job.currency} {cheapest:.2f} against a ceiling of {job.currency} {job.budget_max:.2f}"
+                )
+            job.append("negotiation_failed", "pact", summary)
             self.store.save(job)
             return job
 
