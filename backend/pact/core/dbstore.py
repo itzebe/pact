@@ -57,6 +57,21 @@ def _lock_key(job_id: str) -> int:
     return int.from_bytes(digest[:8], "big") % (2**63)
 
 
+def _driver():
+    """Import psycopg with a message that says what to do about it.
+
+    The import is lazy so the default filesystem path needs no driver installed.
+    """
+    try:
+        import psycopg
+    except ImportError as exc:  # pragma: no cover - depends on the environment
+        raise RuntimeError(
+            "DATABASE_URL is set but the Postgres driver is not installed. "
+            "Install it with `pip install 'psycopg[binary]'` (or `uv sync`)."
+        ) from exc
+    return psycopg
+
+
 class PostgresJobStore:
     """Durable, instance-safe job store. Same surface as ``JobStore``."""
 
@@ -72,9 +87,7 @@ class PostgresJobStore:
     # ------------------------------------------------------------ plumbing
 
     def _connect(self):
-        import psycopg  # imported lazily so the default path needs no driver
-
-        return psycopg.connect(self.dsn, autocommit=True)
+        return _driver().connect(self.dsn, autocommit=True)
 
     @staticmethod
     def _jsonb(value: dict):
@@ -195,9 +208,7 @@ class PostgresReputationLedger:
             cur.execute(SCHEMA)
 
     def _connect(self):
-        import psycopg
-
-        return psycopg.connect(self.dsn, autocommit=True)
+        return _driver().connect(self.dsn, autocommit=True)
 
     @staticmethod
     def _jsonb(value: dict):
