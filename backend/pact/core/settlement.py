@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import uuid
 from contextlib import contextmanager
 from decimal import Decimal
 from typing import Iterator
@@ -32,6 +33,7 @@ from ..paypal.escrow import (
     _parse_capture,
     approval_url,
 )
+from ..config import settings
 from .llm import LLM, LLMError, as_bool
 from .models import (
     IN_FLIGHT_CAPTURE,
@@ -272,17 +274,28 @@ class SettlementEngine:
 
     # ----------------------------------------------------------------- hold
 
-    def hold(self, job: Job) -> Job:
+    def hold(self, job: Job, *, public_url: str | None = None) -> Job:
         """Create an AUTHORIZE order and, when possible, place the hold.
 
         Returns with the job in ``AWAITING_APPROVAL`` when the backend requires a
         buyer to approve the order first. No delivery happens and no money moves
         until :meth:`authorize_hold` succeeds, so an unapproved order is inert.
+
+        ``public_url`` is the deployment's own base URL. It becomes the order's
+        ``return_url``/``cancel_url``: PayPal's redirect flow only sends the buyer
+        back to the merchant when the order names a return target, so without one
+        the buyer approves and is then stranded — which looks exactly like a failed
+        approval. It is never invented: when no base URL is known the fields are
+        omitted rather than pointed at a placeholder host.
         """
         if job.agreed_price is None or job.seller_id is None:
             raise ValueError("Cannot escrow a job with no agreed price and seller")
         if job.escrow.state not in {EscrowState.NONE, EscrowState.AWAITING_APPROVAL}:
             raise ValueError(f"Cannot hold escrow in state {job.escrow.state}")
+
+        base = (public_url or settings.public_url or "").rstrip("/")
+        return_url = f"{base}/?job={job.id}" if base else None
+        cancel_url = f"{base}/?job={job.id}&cancelled=1" if base else None
 
         amount = job.agreed_price
         job.append(
@@ -299,6 +312,8 @@ class SettlementEngine:
             description=f"Pact escrow: {job.title}",
             reference_id=job.id,
             custom_id=job.id,
+            return_url=return_url,
+            cancel_url=cancel_url,
             idempotency_key=f"pact-order-{job.id}",
         )
         order_id = order.get("id", "")
@@ -340,8 +355,15 @@ class SettlementEngine:
             raise ValueError("Escrow is already held for this job")
 
         try:
+            # A fresh key per attempt. PayPal replays the *cached* response for a
+            # repeated PayPal-Request-Id, so a stable key would pin the first
+            # rejection forever: if an authorize was attempted before the buyer
+            # approved (ORDER_NOT_APPROVED) and the buyer then approves, the retry
+            # would keep returning that old rejection and the job could never hold.
+            # A definite rejection moves no money, so retrying it is safe; an
+            # ambiguous outcome is handled separately below and is never retried.
             authorization = self.escrow.authorize_order(
-                job.escrow.order_id, idempotency_key=f"pact-auth-{job.id}"
+                job.escrow.order_id, idempotency_key=f"pact-auth-{job.id}-{uuid.uuid4()}"
             )
         except PayPalError as exc:
             if getattr(exc, "ambiguous", False):

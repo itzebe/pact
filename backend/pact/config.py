@@ -66,6 +66,11 @@ class Settings:
     # moves no money, so reporting one as settled would be a lie about payment.
     require_real_paypal: bool = field(default_factory=lambda: _bool("PACT_REQUIRE_REAL_PAYPAL", False))
     sellers: str = field(default_factory=lambda: os.getenv("PACT_SELLERS", "seller_atlas,seller_nova,seller_quill"))
+    # Public base URL of this deployment, used to build the PayPal return/cancel
+    # URLs. PayPal's redirect flow sends the buyer back to the merchant only if the
+    # order carries a return_url, so without this the buyer has nowhere to return to
+    # and the approval appears to fail. Left unset, the request's own host is used.
+    public_url: str = field(default_factory=lambda: os.getenv("PACT_PUBLIC_URL", "").rstrip("/"))
     cors_origins: list[str] = field(
         default_factory=lambda: [
             o.strip() for o in os.getenv("PACT_CORS_ORIGINS", "http://localhost:5173,http://localhost:4173").split(",") if o.strip()

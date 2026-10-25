@@ -29,6 +29,7 @@ export default function App() {
   const [tab, setTab] = useState('negotiation')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [notice, setNotice] = useState(null)
   const [live, setLive] = useState(false)
   const [liveEntries, setLiveEntries] = useState([])
   const unsubRef = useRef(null)
@@ -71,6 +72,22 @@ export default function App() {
     },
     [],
   )
+
+  // Returning from PayPal. The order's return_url carries ?job=<id>, so the buyer
+  // lands back on their own settlement with the "I approved — continue" action in
+  // reach, rather than on an empty page having to find the job again. The query is
+  // cleared so a reload does not re-trigger this.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const returned = params.get('job')
+    if (!returned) return
+    const cancelled = params.get('cancelled')
+    window.history.replaceState({}, '', window.location.pathname)
+    openJob(returned)
+    if (cancelled) {
+      setNotice('You cancelled the PayPal approval. Nothing was held, so nothing was charged.')
+    }
+  }, [openJob])
 
   const run = useCallback(
     async (payload) => {
@@ -205,6 +222,15 @@ export default function App() {
               className="chip mt-3 ring-1 bg-paypal-deep/50 text-paypal-bright ring-paypal/40 disabled:opacity-50"
             >
               {busy ? 'Reconciling…' : 'Reconcile with PayPal'}
+            </button>
+          </div>
+        )}
+
+        {notice && (
+          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
+            <div className="text-xs text-paper-dim">{notice}</div>
+            <button className="text-2xs text-paper-faint hover:text-paper" onClick={() => setNotice(null)}>
+              dismiss
             </button>
           </div>
         )}
