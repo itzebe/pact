@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -77,6 +81,31 @@ async def announce_configuration() -> None:
         settings.currency,
         _static or "served separately",
     )
+
+
+def _json_safe(value: Any) -> Any:
+    """Make a validation-error payload JSON-serialisable.
+
+    ``jsonable_encoder`` first, because ``errors()`` can hold ``Decimal`` values
+    that the encoder normalises. Then non-finite floats are stringified: Pydantic
+    echoes the offending input back, so for ``{"budget_max": 1e999}`` the payload
+    contains ``inf``, and Starlette renders JSON with ``allow_nan=False``. Building
+    the 422 would itself raise ``ValueError`` and surface as a 500 — a rejected
+    input must stay a rejection.
+    """
+    value = jsonable_encoder(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": _json_safe(exc.errors())})
 
 
 @app.exception_handler(Exception)

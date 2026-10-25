@@ -185,3 +185,29 @@ def test_jobs_list_and_global_ledger(client):
     create(client)
     assert len(client.get("/api/jobs").json()["jobs"]) == 1
     assert "entries" in client.get("/api/ledger").json()
+
+
+def test_non_finite_budget_is_a_422_not_a_500(client):
+    """A rejected input must stay a rejection.
+
+    Pydantic echoes the offending value back in the validation error. For
+    ``1e999`` that value is ``inf``, and Starlette renders JSON with
+    ``allow_nan=False``, so serialising the 422 raised ValueError and became a
+    500. The handler now sanitises non-finite floats before rendering.
+    """
+    for raw in (b'{"title":"Valid title","brief":"Valid brief","acceptance_criteria":["c"],"budget_max":1e999}',
+                b'{"title":"Valid title","brief":"Valid brief","acceptance_criteria":["c"],"budget_max":-1e999}'):
+        response = client.post("/api/jobs", content=raw, headers={"Content-Type": "application/json"})
+        assert response.status_code == 422, response.text
+        assert "Internal error" not in response.text
+        assert response.json()["detail"], "the rejection must explain itself"
+
+
+def test_an_ordinary_invalid_budget_is_still_rejected(client):
+    for value in ('"abc"', "null", "-5", '"NaN"', '"Infinity"'):
+        response = client.post(
+            "/api/jobs",
+            content=f'{{"title":"Valid title","brief":"Valid brief","acceptance_criteria":["c"],"budget_max":{value}}}'.encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422, f"{value} -> {response.status_code}"
