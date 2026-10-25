@@ -39,11 +39,17 @@ from pact.core.dbstore import PostgresJobStore, PostgresReputationLedger  # noqa
 @pytest.fixture()
 def clean_db():
     """A fresh schema per test, so counts never leak between cases."""
+    # Construct the stores first: opening them creates the schema, which must
+    # exist before the TRUNCATE. On a brand-new database (the documented
+    # ``createdb pact`` flow) truncating first raised UndefinedTable.
+    store = PostgresJobStore(DATABASE_URL)
+    ledger = PostgresReputationLedger(DATABASE_URL)
+
     import psycopg
 
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE jobs, reputation")
-    return PostgresJobStore(DATABASE_URL), PostgresReputationLedger(DATABASE_URL)
+    return store, ledger
 
 
 def _engine(store, ledger, escrow=None):
@@ -536,3 +542,103 @@ def test_reconciled_settlement_credits_reputation_on_the_db_path(clean_db):
     assert record["failed"] == 0, "the reversal must persist, not just live in memory"
     assert record["settled"] == 1
     assert record["volume"] == 120.0
+
+
+# --------------------------------------------- reputation under concurrency
+
+
+def test_concurrent_reputation_updates_do_not_lose_increments(clean_db):
+    """Many settlements for the same seller at once must not lose any increment.
+
+    Reputation is a read-modify-write of a JSON document. Reading it, changing it,
+    and writing it back in separate transactions lets two writers read the same
+    value and overwrite each other, so a burst of settlements silently records only
+    the last one. The score then contradicts the ledger.
+    """
+    import threading
+
+    import psycopg
+
+    from pact.core.dbstore import PostgresReputationLedger
+
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("TRUNCATE jobs, reputation")
+
+    workers = 32
+    barrier = threading.Barrier(workers)
+    errors: list[Exception] = []
+
+    def settle() -> None:
+        # A separate ledger per thread, as a separate instance would have.
+        local = PostgresReputationLedger(DATABASE_URL)
+        try:
+            barrier.wait(timeout=30)
+            local.record_settled("seller_race", 10.0)
+        except Exception as exc:  # recorded for the assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=settle) for _ in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)
+
+    assert not errors, f"concurrent reputation updates failed: {errors}"
+    record = PostgresReputationLedger(DATABASE_URL).get("seller_race")
+    assert record["settled"] == workers, (
+        f"every increment must persist; got {record['settled']} of {workers}"
+    )
+    assert record["volume"] == workers * 10.0
+
+
+def test_the_reputation_race_is_real_without_the_row_lock(clean_db):
+    """Negative control: prove the row lock is what prevents the lost updates.
+
+    Running the same burst with the lock removed must lose increments. If it does
+    not, the guarded test above proves nothing about the guard.
+    """
+    import threading
+
+    import psycopg
+
+    import pact.core.dbstore as db
+
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("TRUNCATE jobs, reputation")
+
+    original = db.PostgresReputationLedger._mutate
+
+    def unlocked_mutate(self, agent_id, apply):
+        """The same read-modify-write with no transaction and no row lock."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT doc FROM reputation WHERE agent_id = %s", (agent_id,))
+                row = cur.fetchone()
+            record = row[0] if row else self._blank(agent_id)
+            apply(record)
+            self._write(conn, record)
+            return dict(record)
+
+    db.PostgresReputationLedger._mutate = unlocked_mutate
+    try:
+        workers = 32
+        barrier = threading.Barrier(workers)
+
+        def settle() -> None:
+            local = db.PostgresReputationLedger(DATABASE_URL)
+            barrier.wait(timeout=30)
+            local.record_settled("seller_unlocked", 10.0)
+
+        threads = [threading.Thread(target=settle) for _ in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=120)
+    finally:
+        db.PostgresReputationLedger._mutate = original
+
+    record = db.PostgresReputationLedger(DATABASE_URL).get("seller_unlocked")
+    assert record["settled"] < workers, (
+        "the negative control did not lose any update, so the guarded test is not "
+        "load-bearing; the row lock is not what protects this path"
+    )

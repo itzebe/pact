@@ -208,7 +208,13 @@ class PostgresReputationLedger:
             cur.execute(SCHEMA)
 
     def _connect(self):
-        return _driver().connect(self.dsn, autocommit=True)
+        """One transaction per connection, so ``SELECT ... FOR UPDATE`` actually locks.
+
+        Autocommit would commit the ``FOR UPDATE`` immediately and release the row
+        lock before the write, so concurrent increments for the same agent would
+        read the same value and overwrite each other — silently losing settlements.
+        """
+        return _driver().connect(self.dsn, autocommit=False)
 
     @staticmethod
     def _jsonb(value: dict):
@@ -243,14 +249,25 @@ class PostgresReputationLedger:
         }
 
     def _mutate(self, agent_id: str, apply) -> dict:
-        """Read-modify-write one agent under a row lock.
+        """Read-modify-write one agent under a row lock, in one transaction.
 
-        Concurrent settlements for the same agent must not lose an increment, so
-        the row is selected FOR UPDATE and the counters are recomputed in Python
-        from the locked copy.
+        Concurrent settlements for the same agent must not lose an increment, so the
+        row is selected ``FOR UPDATE`` and the counters are recomputed from the
+        locked copy inside the same transaction that writes them. A missing row is
+        inserted first so the lock is always taken on a real row.
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
+                # Take the lock on a row that certainly exists. A plain FOR UPDATE
+                # over nothing locks nothing, which is how concurrent inserts for a
+                # brand-new agent would both read the blank record.
+                cur.execute(
+                    """
+                    INSERT INTO reputation (agent_id, doc) VALUES (%s, %s)
+                    ON CONFLICT (agent_id) DO NOTHING
+                    """,
+                    (agent_id, self._jsonb(self._blank(agent_id))),
+                )
                 cur.execute(
                     "SELECT doc FROM reputation WHERE agent_id = %s FOR UPDATE",
                     (agent_id,),
@@ -259,6 +276,7 @@ class PostgresReputationLedger:
             record = row[0] if row else self._blank(agent_id)
             apply(record)
             self._write(conn, record)
+            conn.commit()
             return dict(record)
 
     def record_settled(self, agent_id: str, amount: float) -> dict:
@@ -274,6 +292,19 @@ class PostgresReputationLedger:
 
     def record_failed(self, agent_id: str) -> dict:
         return self._mutate(agent_id, lambda r: r.__setitem__("failed", r["failed"] + 1))
+
+    def record_reconciliation_reversed(self, agent_id: str) -> dict:
+        """Withdraw the failure charged for an outcome that turned out to be no fault.
+
+        Mirrors the filesystem ledger: reconciliation that finds no capture was
+        applied means the seller was never at fault, so the provisional failure is
+        reversed.
+        """
+
+        def apply(record: dict) -> None:
+            record["failed"] = max(0, record["failed"] - 1)
+
+        return self._mutate(agent_id, apply)
 
     def record_reconciled(self, agent_id: str, amount: float) -> dict:
         """Correct an earlier unresolved outcome once PayPal confirms the payment.

@@ -34,6 +34,7 @@ from ..paypal.escrow import (
 )
 from .llm import LLM, LLMError
 from .models import (
+    IN_FLIGHT_CAPTURE,
     CriterionResult,
     Delivery,
     EscrowState,
@@ -235,7 +236,7 @@ class SettlementEngine:
         """Push the current escrow state to the shared store, if there is one.
 
         On the DB path this is what makes a claim visible to other instances. The
-        in-memory ``capture_id = "pending"`` marker is meaningless to a process that
+        in-memory ``capture_id = IN_FLIGHT_CAPTURE`` marker is meaningless to a process that
         never saw it, so it has to be written before the provider is called.
         """
         store = self.store
@@ -410,7 +411,7 @@ class SettlementEngine:
 
             # Claim the authorization before calling out, so a racing attempt sees
             # an in-progress capture rather than an open one.
-            job.escrow.capture_id = "pending"
+            job.escrow.capture_id = IN_FLIGHT_CAPTURE
             # Write the claim before the call, so a second instance that takes the
             # lock next sees a capture in progress instead of an open authorization.
             self._persist(job)
@@ -427,7 +428,7 @@ class SettlementEngine:
                            authorization_id=job.escrow.authorization_id)
                 if getattr(exc, "ambiguous", False):
                     # The capture may have been applied before the response was lost.
-                    # Keep the "pending" marker so the in-flight fact survives, and
+                    # Keep the in-flight marker so the captured-may-have-landed fact survives, and
                     # leave the job UNRESOLVED: a blind retry could capture twice, so
                     # only an explicit reconciliation may move it on.
                     self.mark_unresolved(
@@ -437,7 +438,7 @@ class SettlementEngine:
                     )
                 else:
                     # Definite failure: no money moved, so withdraw the claim. Leaving
-                    # "pending" in the shared row would wedge the job permanently,
+                    # the in-flight marker in the shared row would wedge the job permanently,
                     # because every later attempt would see a capture that never was.
                     job.escrow.capture_id = ""
                     self._persist(job)
@@ -498,7 +499,7 @@ class SettlementEngine:
                 raise ValueError(f"Cannot void escrow in state {job.escrow.state}")
             if not job.escrow.authorization_id:
                 raise ValueError("No authorization to void")
-            if job.escrow.capture_id:
+            if job.escrow.capture_id and job.escrow.capture_id != IN_FLIGHT_CAPTURE:
                 raise ValueError("Cannot void an authorization that has already been captured")
 
             try:
@@ -516,6 +517,10 @@ class SettlementEngine:
             # Confirm with the provider that the hold is actually released rather than
             # reporting a void on the strength of a success response alone.
             confirmed = self._confirm_void(job.escrow.authorization_id)
+            # A void succeeded, and PayPal refuses to void a captured authorization,
+            # so no capture was applied. An interrupted in-flight claim can be
+            # withdrawn rather than left to read as a capture that never happened.
+            self._clear_claim(job)
             job.escrow.state = EscrowState.VOIDED
             job.status = JobStatus.VOIDED
 
@@ -575,6 +580,25 @@ class SettlementEngine:
         job at once: the second adopts the first's resolution and refuses.
         """
         with self._guard(job):
+            if job.escrow.state == EscrowState.HELD and job.escrow.capture_id == IN_FLIGHT_CAPTURE:
+                # A crash between persisting the in-flight claim and the provider
+                # call leaves the job in HELD with a claim whose outcome nobody
+                # recorded. It is blocked from settling (correctly) but must still
+                # be reconcilable, or the job is wedged forever.
+                job.escrow.state = EscrowState.UNRESOLVED
+                job.status = JobStatus.UNRESOLVED
+                job.append(
+                    "settlement_unresolved",
+                    "pact",
+                    "A capture claim was interrupted before its outcome was recorded; "
+                    "reconciliation required before any further attempt",
+                    authorization_id=job.escrow.authorization_id,
+                    order_id=job.escrow.order_id,
+                    capture_id=job.escrow.capture_id,
+                )
+                self._persist(job)
+            if job.escrow.state != EscrowState.UNRESOLVED:
+                raise ValueError(f"Job is not unresolved (escrow state {job.escrow.state})")
             return self._reconcile(job)
 
     def _reconcile(self, job: Job) -> Job:
@@ -614,6 +638,10 @@ class SettlementEngine:
             # money never moved, so the in-flight marker is withdrawn and the job
             # can be settled normally again.
             self._clear_claim(job)
+            # mark_unresolved recorded this unknown outcome as a failure, but no
+            # capture was applied, so the seller was never at fault. Reverse it, or
+            # a transient timeout would permanently depress the seller's score.
+            self._reverse_unresolved_failure(job, f"authorization {authorization_id} is {status}")
             return self._resolve(job, EscrowState.HELD, JobStatus.ESCROWED,
                                  f"PayPal reports authorization {authorization_id} as {status}; "
                                  f"no capture was applied and the hold is intact")
@@ -668,6 +696,10 @@ class SettlementEngine:
         status = str(authorization.status).upper()
 
         if status in HOLDABLE_STATUSES:
+            # The hold landed after an ambiguous authorize. The failure recorded
+            # while the outcome was unknown was not the seller's, and the job is
+            # about to proceed to delivery, so reverse it here too.
+            self._reverse_unresolved_failure(job, f"order {order_id} holds authorization {authorization.id}")
             return self._resolve(job, EscrowState.HELD, JobStatus.ESCROWED,
                                  f"Reconciled: order {order_id} holds authorization "
                                  f"{authorization.id} ({status})")
@@ -697,7 +729,7 @@ class SettlementEngine:
         """
         capture_id = job.escrow.capture_id
         status = ""
-        if capture_id and capture_id != "pending":
+        if capture_id and capture_id != IN_FLIGHT_CAPTURE:
             try:
                 status = str(self.escrow.get_capture(capture_id).status).upper()
             except PayPalError as exc:
@@ -752,9 +784,38 @@ class SettlementEngine:
         Leaving ``pending`` behind would make every later attempt refuse with
         "already captured", which is the wedge this whole path exists to avoid.
         """
-        if job.escrow.capture_id == "pending":
+        if job.escrow.capture_id == IN_FLIGHT_CAPTURE:
             job.escrow.capture_id = ""
             job.escrow.capture_status = ""
+
+    def _reverse_unresolved_failure(self, job: Job, reason: str) -> None:
+        """Undo the failure ``mark_unresolved`` charged the seller for an unknown outcome.
+
+        Only the most recent entry counts: if the ledger's last
+        ``settlement_unresolved`` was already reversed, doing it again would
+        double-credit. ``mark_unresolved`` skips charging when the job is already
+        unresolved, so at most one unreversed failure can be outstanding.
+        """
+        if not job.seller_id:
+            return
+        unresolved = [i for i, e in enumerate(job.ledger) if e.kind == "settlement_unresolved"]
+        if not unresolved:
+            return
+        last = unresolved[-1]
+        if any(e.kind == "reputation_corrected" and e.detail.get("for_seq") == job.ledger[last].seq
+               for e in job.ledger[last + 1:]):
+            return
+        record = self.reputation.record_reconciliation_reversed(job.seller_id)
+        job.append(
+            "reputation_corrected",
+            "pact",
+            f"{job.seller_id} score now {self.reputation.score(record):.3f} "
+            f"({record['failed']} failed) after reconciliation",
+            agent_id=job.seller_id,
+            score=self.reputation.score(record),
+            for_seq=job.ledger[last].seq,
+            reason=reason,
+        )
 
     def _resolve(self, job: Job, state: EscrowState, status: JobStatus, summary: str,
                  **detail: Any) -> Job:
