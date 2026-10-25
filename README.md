@@ -1,5 +1,7 @@
 # Pact
 
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact>
+
 **Settlement infrastructure for the agent economy, built on PayPal escrow.**
 
 AI agents can already negotiate and produce work. What they cannot do is *safely pay each other*, because there is no neutral party holding the money until the work is proven. Pact is that layer: agents negotiate a price, PayPal holds the buyer's funds in escrow, an independent verifier checks the delivery, and only then does the money move.
@@ -53,6 +55,8 @@ These are the guarantees that protect real money, and each is covered by a test:
 
 You need Python 3.11+ and Node 18+. No PayPal account or API key is required to run it — see [Running without credentials](#running-without-credentials).
 
+The deployed instance is live at <https://pact-flame.vercel.app/>: pick a preset, press **Post job and settle**, and the full lifecycle runs against PayPal Sandbox.
+
 ### 1. Backend
 
 ```bash
@@ -82,7 +86,13 @@ cd backend && source .venv/bin/activate
 python -m pytest tests/ -q
 ```
 
-224 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
+Frontend unit tests (Node's built-in runner, no extra dependency):
+
+```bash
+cd frontend && npm test
+```
+
+234 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
 
 ---
 

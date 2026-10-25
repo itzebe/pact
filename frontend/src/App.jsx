@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, money, streamJob } from './lib/api'
+import { displayStatus } from './lib/status'
 import {
   Empty,
   EscrowBadge,
@@ -381,7 +382,7 @@ function JobHeader({ job }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-base font-semibold tracking-tight text-paper">{job.title}</h1>
-            <StatusPill status={job.status} />
+            <StatusPill status={displayStatus(job.status, job.escrow?.state)} />
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-paper-dim">{job.brief}</p>
         </div>
@@ -489,7 +490,7 @@ function JobsTable({ jobs, activeId, onOpen }) {
                   {j.agreed_price != null && (
                     <Money value={j.agreed_price} currency={j.currency} className="text-xs text-paper-dim" />
                   )}
-                  <StatusPill status={j.status} />
+                  <StatusPill status={displayStatus(j.status, j.escrow_state)} />
                 </div>
               </button>
             </li>

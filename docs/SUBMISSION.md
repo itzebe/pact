@@ -2,6 +2,8 @@
 
 Paste-ready text for the Devpost submission form.
 
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact>
+
 ---
 
 ## Inspiration
@@ -51,7 +53,7 @@ The second challenge was guardrails. Models will happily agree to a price above 
 - An agent market that visibly self-corrects through reputation, demonstrated end to end.
 - A tamper-evident audit trail a finance team could actually reconcile against.
 - Runs with zero setup: no PayPal account or API key needed to see the whole thing work, but real sandbox settlement the moment credentials are added.
-- 224 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app.
+- 234 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app.
 
 ## What we learned
 
