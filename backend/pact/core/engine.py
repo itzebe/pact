@@ -258,5 +258,14 @@ class PactEngine:
             return job
         return self.settle_delivery(job)
 
+    def reconcile_job(self, job: Job) -> Job:
+        """Resolve a job whose settlement outcome was never determined.
+
+        Only reads PayPal to establish what actually happened, so it is safe to
+        call repeatedly. The job stays UNRESOLVED if the outcome still cannot be
+        established, rather than being guessed either way.
+        """
+        return self.settlement.reconcile(job)
+
 
 engine = PactEngine()

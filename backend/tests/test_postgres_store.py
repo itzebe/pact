@@ -31,13 +31,15 @@ pytestmark = pytest.mark.skipif(
 CRITERIA = ["The deliverable states the headline result"]
 BACKEND = Path(__file__).resolve().parents[1]
 
+# Imported at module level so the tests read clearly; the module itself is safe to
+# import without a database (the connection is only opened on use).
+from pact.core.dbstore import PostgresJobStore, PostgresReputationLedger  # noqa: E402
+
 
 @pytest.fixture()
 def clean_db():
     """A fresh schema per test, so counts never leak between cases."""
     import psycopg
-
-    from pact.core.dbstore import PostgresJobStore, PostgresReputationLedger
 
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE jobs, reputation")
@@ -53,11 +55,11 @@ def _engine(store, ledger, escrow=None):
                       store=store, reputation_ledger=ledger)
 
 
-def _held_job(store, ledger):
+def _held_job(store, ledger, escrow=None):
     """A job sitting in HELD with an authorization, ready to settle."""
     from pact.core.models import EscrowState
 
-    engine = _engine(store, ledger)
+    engine = _engine(store, ledger, escrow=escrow)
     job = engine.create_job(title="Race", brief="b", criteria=CRITERIA,
                             budget_max=Decimal("100"))
     job.seller_id = "seller_nova"
@@ -254,3 +256,283 @@ def test_two_processes_cannot_both_capture(clean_db, tmp_path):
     assert final.escrow.state is EscrowState.RELEASED
     assert final.status is JobStatus.SETTLED
     assert final.verify_chain() is True
+
+
+def test_the_race_test_fails_when_the_lock_key_is_not_deterministic(clean_db, tmp_path):
+    """Negative control: prove the advisory lock is load-bearing.
+
+    A test that passes with the guard removed proves nothing. This runs the same
+    four-process race with the lock key made per-process, which is exactly the bug
+    a salted ``hash()`` would introduce: every instance computes a different key,
+    so no instance ever blocks, and several captures reach the provider.
+    """
+    from pact.core.models import EscrowState
+
+    store, ledger = clean_db
+    job = _held_job(store, ledger)
+
+    log = tmp_path / "provider.log"
+    log.write_text("")
+    # Same race, but the lock key varies per process so the lock is never shared.
+    broken = RACE_SCRIPT.replace(
+        "store = PostgresJobStore(dsn)",
+        "import pact.core.dbstore as _db\n"
+        "_db._lock_key = lambda job_id: (hash(job_id) % (2**63))\n"
+        "store = PostgresJobStore(dsn)",
+    )
+    assert broken != RACE_SCRIPT, "negative control failed to patch the lock key"
+    script = tmp_path / "race_broken.py"
+    script.write_text(broken)
+
+    start_at = time.time() + 2.0
+    env = {**os.environ, "PYTHONPATH": str(BACKEND), "DATABASE_URL": DATABASE_URL,
+           "PYTHONHASHSEED": "random"}
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(script), DATABASE_URL, job.id, str(log), str(start_at)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        for _ in range(4)
+    ]
+    [p.communicate(timeout=120) for p in procs]
+
+    lines = log.read_text().splitlines()
+    # With no shared lock, more than one process reaches the provider. If this
+    # ever stops being true, the positive test above is not proving anything.
+    assert lines.count("capture") + lines.count("duplicate") > 1, (
+        f"negative control did not reproduce the race, so the guarded test is not "
+        f"load-bearing; provider log was {lines}"
+    )
+
+
+# ------------------------------------------------------ schema and durability
+
+
+def test_schema_is_created_on_a_brand_new_database():
+    """Schema readiness: opening the store must create what it needs.
+
+    Run against a throwaway database so this genuinely exercises the migration
+    path rather than trusting that some earlier test created the tables.
+    """
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    from pact.core.dbstore import SCHEMA
+
+    # Parse rather than string-edit the DSN: it may carry a query string.
+    params = conninfo_to_dict(DATABASE_URL)
+    name = f"pact_schema_{int(time.time() * 1000)}"
+    admin = make_conninfo(**{**params, "dbname": "postgres"})
+    fresh = make_conninfo(**{**params, "dbname": name})
+    with psycopg.connect(admin, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f'CREATE DATABASE "{name}"')
+    try:
+        store = PostgresJobStore(fresh)  # must create the schema itself
+        with psycopg.connect(fresh) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' ORDER BY table_name"
+            )
+            tables = {row[0] for row in cur.fetchall()}
+        assert {"jobs", "reputation"} <= tables, f"schema incomplete: {tables}"
+        assert "CREATE TABLE IF NOT EXISTS jobs" in SCHEMA
+        assert store.get("does-not-exist") is None
+    finally:
+        with psycopg.connect(admin, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+def test_health_reports_the_real_backend_and_durability(clean_db):
+    """The health endpoint must not claim durability it does not have."""
+    from pact.api.routes import health
+
+    body = health()
+    assert body["storage"]["backend"] == "postgres"
+    assert body["storage"]["durable"] is True
+    assert "error" not in body["storage"]
+    assert body["status"] == "ok"
+
+
+def test_ledger_integrity_survives_concurrent_settlements(clean_db):
+    """Concurrent settlements must not corrupt any job's hash chain."""
+    from pact.core.models import EscrowState
+
+    store, ledger = clean_db
+    engine = _engine(store, ledger)
+    jobs = []
+    for index in range(4):
+        job = engine.create_job(title=f"Concurrent {index}", brief="b", criteria=CRITERIA,
+                                budget_max=Decimal("100"))
+        job.seller_id = "seller_nova"
+        job.agreed_price = Decimal("50.00")
+        engine.settlement.hold(job)
+        store.save(job)
+        jobs.append(job)
+
+    import threading
+
+    errors: list[Exception] = []
+
+    def settle(job):
+        try:
+            # A separate store object per worker, as a separate instance would have,
+            # but the same provider: the authorization lives in the provider's own
+            # state, not in the database.
+            local = PostgresJobStore(DATABASE_URL).get(job.id)
+            local_engine = _engine(PostgresJobStore(DATABASE_URL),
+                                   PostgresReputationLedger(DATABASE_URL),
+                                   escrow=engine.escrow)
+            local_engine.settlement.release(local)
+        except Exception as exc:  # recorded, asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=settle, args=(j,)) for j in jobs]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)
+
+    assert not errors, f"concurrent settlements failed: {errors}"
+    for job in jobs:
+        restored = store.get(job.id)
+        assert restored.escrow.state is EscrowState.RELEASED
+        assert restored.verify_chain() is True, f"chain broken for {job.id}"
+
+
+def test_a_connection_lost_while_holding_the_lock_does_not_block_others(clean_db):
+    """A dropped connection must release the session lock, not deadlock the job.
+
+    PostgreSQL releases session-level advisory locks when the session ends, which
+    is what makes holding one across an external call survivable: a crashed
+    instance cannot strand the job.
+    """
+    from pact.core.models import EscrowState
+
+    from pact.paypal.mock import MockPayPalEscrowClient
+
+    store, ledger = clean_db
+    # One provider shared by the job and the engine that settles it: the
+    # authorization lives in the provider, not in the database.
+    escrow = MockPayPalEscrowClient()
+    job = _held_job(store, ledger, escrow=escrow)
+    engine = _engine(store, ledger, escrow=escrow)
+
+    import psycopg
+
+    from pact.core.dbstore import _lock_key
+
+    key = _lock_key(job.id)
+    # Take the lock on a session, then abandon that session without unlocking.
+    victim = psycopg.connect(DATABASE_URL, autocommit=True)
+    with victim.cursor() as cur:
+        cur.execute("SELECT pg_advisory_lock(%s)", (key,))
+    victim.close()
+
+    # Another session must now be able to take it, proving the lock was released.
+    settled = engine.settlement.release(store.get(job.id))
+    assert settled.escrow.state is EscrowState.RELEASED
+
+
+def test_the_lock_is_released_after_an_exception(clean_db):
+    """An exception inside the guarded section must not strand the lock."""
+    import psycopg
+
+    from pact.core.dbstore import _lock_key
+
+    store, ledger = clean_db
+    job = _held_job(store, ledger)
+
+    with pytest.raises(RuntimeError):
+        with store.settlement_claim(job):
+            raise RuntimeError("boom")
+
+    # If the lock leaked, this would block forever rather than returning.
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (_lock_key(job.id),))
+        acquired = cur.fetchone()[0]
+        if acquired:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (_lock_key(job.id),))
+    assert acquired is True, "the advisory lock leaked after an exception"
+
+
+def test_a_second_instance_sees_the_claim_and_refuses_to_capture(clean_db):
+    """Concurrent retries from multiple instances: only one may capture."""
+    from pact.core.models import EscrowState
+
+    store, ledger = clean_db
+    job = _held_job(store, ledger)
+
+    # Simulate the first instance having committed its in-flight claim.
+    claimed = store.get(job.id)
+    claimed.escrow.capture_id = "pending"
+    store.save(claimed)
+
+    # A second, independent instance must refuse rather than capture again.
+    other = PostgresJobStore(DATABASE_URL)
+    engine = _engine(other, PostgresReputationLedger(DATABASE_URL))
+    fresh = other.get(job.id)
+    with pytest.raises(ValueError, match="already captured"):
+        engine.settlement.release(fresh)
+    assert other.get(job.id).escrow.state is EscrowState.HELD
+
+
+# --------------------------------------------- unsafe production fallback
+
+
+def test_unavailable_database_disables_settlement_instead_of_falling_back(monkeypatch):
+    """A configured-but-unreachable database must not degrade to local files.
+
+    On a serverless host that fallback would look healthy while losing the ledger
+    on every cold start. It must refuse instead, and say so through /api/health.
+    """
+    from pact.config import settings
+    from pact.core import store as store_module
+
+    object.__setattr__(settings, "database_url", "postgresql://nobody@127.0.0.1:1/nope")
+    try:
+        job_store, reputation = store_module._select_backend()
+        assert job_store.backend == "unavailable"
+        assert job_store.durable is False
+        with pytest.raises(RuntimeError, match="Durable storage is unavailable"):
+            job_store.get("anything")
+        with pytest.raises(RuntimeError):
+            job_store.save(object())
+    finally:
+        object.__setattr__(settings, "database_url", DATABASE_URL)
+
+
+def test_reconciled_settlement_credits_reputation_on_the_db_path(clean_db):
+    """The Postgres ledger must apply the same reconciliation correction.
+
+    Both backends have to agree, or reputation would differ depending on where the
+    deployment happens to be running.
+    """
+    from pact.core.models import EscrowState
+    from pact.paypal import AmbiguousOutcome
+
+    store, ledger = clean_db
+    engine = _engine(store, ledger)
+    job = _held_job(store, ledger, escrow=engine.escrow)
+    assert job.seller_id == "seller_nova"
+
+    original = engine.escrow.capture_authorization
+
+    def apply_then_lose(authorization_id, **kwargs):
+        capture = original(authorization_id, **kwargs)
+        raise AmbiguousOutcome(f"capture {capture.id} applied, response lost", code="TIMEOUT")
+
+    engine.escrow.capture_authorization = apply_then_lose
+    with pytest.raises(AmbiguousOutcome):
+        engine.settlement.release(job)
+    engine.escrow.capture_authorization = original
+
+    unresolved = store.get(job.id)
+    assert unresolved.escrow.state is EscrowState.UNRESOLVED
+    assert engine.reputation.get("seller_nova")["failed"] == 1
+
+    engine.reconcile_job(unresolved)
+
+    record = PostgresReputationLedger(DATABASE_URL).get("seller_nova")
+    assert record["failed"] == 0, "the reversal must persist, not just live in memory"
+    assert record["settled"] == 1
+    assert record["volume"] == 120.0

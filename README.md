@@ -43,6 +43,7 @@ These are the guarantees that protect real money, and each is covered by a test:
 - **Settled means paid.** A job is recorded as settled only when the capture status is `COMPLETED`. `PENDING`, `FAILED` and `DECLINED` are not settlement.
 - **Captured at most once.** Settlement is serialised behind a lock and claims the authorization before the call, so concurrent requests cannot produce a duplicate capture. A second attempt is refused.
 - **An unknown outcome is not a failure.** A timeout, a dropped connection, or a 5xx leaves the job `unresolved` and asks a human to reconcile. It is never retried automatically, because a blind retry is how double-charges happen.
+- **Reconciliation asks PayPal, it does not guess.** `POST /api/jobs/{id}/reconcile` reads the authorization (and the order, if the authorize itself was lost) to establish what actually happened. `CAPTURED` settles the job using the real capture id recovered from PayPal and credits the seller (reversing the failure recorded while the outcome was unknown); an intact hold clears the in-flight marker so the job is retryable; an unreachable PayPal leaves the job `unresolved` and blocked, because an outage is not evidence that no money moved.
 - **A void is confirmed.** After voiding, Pact re-reads the authorization and records whether PayPal confirmed it.
 - **No capture without a passing verdict.** A failed or inconclusive verification never reaches the capture call.
 
@@ -96,7 +97,7 @@ Pact is designed so a reviewer can clone it and see the complete lifecycle with 
 
 Both fallbacks are deliberately loud. A simulated settlement must never be confused with a real one.
 
-To require real credentials and refuse the mock path, set `PACT_ALLOW_MOCK_PAYPAL=false`.
+To require real credentials and refuse the mock path, set `PACT_ALLOW_MOCK_PAYPAL=false`. To make missing credentials a hard startup failure on a deployment where settlement must be real, set `PACT_REQUIRE_REAL_PAYPAL=true` — otherwise a production deploy with no credentials would settle against the in-memory double and report a `settled` job for which no money ever moved.
 
 ---
 
@@ -186,6 +187,8 @@ This is what makes the output defensible as a financial record rather than an ap
 | `GET` | `/api/health` | Configuration and settlement mode |
 | `POST` | `/api/jobs` | Post a job |
 | `POST` | `/api/jobs/{id}/run` | Run the full lifecycle |
+| `POST` | `/api/jobs/{id}/approve` | Continue after the buyer approves the PayPal order |
+| `POST` | `/api/jobs/{id}/reconcile` | Resolve an `unresolved` job by reading PayPal |
 | `GET` | `/api/jobs/{id}` | Full job state |
 | `GET` | `/api/jobs/{id}/ledger` | Audit trail + chain validity |
 | `GET` | `/api/jobs/{id}/stream` | Server-sent events, live |

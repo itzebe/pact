@@ -196,6 +196,24 @@ class ReputationLedger:
             self._flush()
             return dict(record)
 
+    def record_reconciled(self, agent_id: str, amount: float) -> dict:
+        """Correct an earlier unresolved outcome once PayPal confirms the payment.
+
+        An ambiguous capture is recorded as a failure while the outcome is unknown,
+        because that is the honest reading at the time. When reconciliation later
+        establishes that the money did move, that failure was not the seller's and
+        the settlement must be credited, or the reputation contradicts the ledger.
+        """
+        with self._lock:
+            record = self._record_for(agent_id)
+            # Reverse the failure recorded by mark_unresolved, never below zero.
+            record["failed"] = max(0, record["failed"] - 1)
+            record["settled"] += 1
+            record["volume"] = round(record["volume"] + float(amount), 2)
+            record["last_settled_at"] = datetime.now(timezone.utc).isoformat()
+            self._flush()
+            return dict(record)
+
     @staticmethod
     def score(record: dict) -> float:
         """Verified delivery rate, smoothed toward 0.5 for thin histories.
@@ -225,6 +243,33 @@ class ReputationLedger:
             return record
 
 
+class UnavailableStore:
+    """Stands in when the configured durable backend could not be opened.
+
+    Refusing to serve is safer than silently falling back to instance-local files:
+    on a serverless host that fallback would look healthy while losing the ledger
+    on every cold start, and could settle real money against state no other
+    instance can see. Every operation raises, so no settlement can proceed, and
+    ``error`` is reported through ``/api/health`` so the cause is visible instead
+    of appearing as an unexplained 500 on every route.
+    """
+
+    backend = "unavailable"
+    durable = False
+    supports_claims = False
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def _fail(self, *_, **__):
+        raise RuntimeError(
+            f"Durable storage is unavailable, so settlement is disabled: {self.error}"
+        )
+
+    save = get = list = delete = claim_run = _fail
+    settlement_claim = _fail
+
+
 def _select_backend():
     """Choose the persistence backend from configuration.
 
@@ -235,9 +280,19 @@ def _select_backend():
     dsn = settings.database_url
     if not dsn:
         return JobStore(), ReputationLedger()
+
     from .dbstore import PostgresJobStore, PostgresReputationLedger
 
-    return PostgresJobStore(dsn), PostgresReputationLedger(dsn)
+    try:
+        return PostgresJobStore(dsn), PostgresReputationLedger(dsn)
+    except Exception as exc:  # connection refused, bad credentials, missing schema
+        log.error(
+            "DATABASE_URL is set but the Postgres backend could not be opened (%s). "
+            "Settlement is disabled until the database is reachable; the app will NOT "
+            "fall back to non-durable local storage.",
+            exc,
+        )
+        return UnavailableStore(exc), ReputationLedger()
 
 
 job_store, reputation = _select_backend()

@@ -54,12 +54,24 @@ def _job_or_404(job_id: str) -> Job:
 
 @router.get("/health")
 def health() -> dict[str, Any]:
+    store = engine.store
+    storage: dict[str, Any] = {
+        "backend": getattr(store, "backend", "unknown"),
+        "durable": bool(getattr(store, "durable", False)),
+    }
+    # When the configured durable backend could not be opened, say why here rather
+    # than letting every route fail with an unexplained 500.
+    if getattr(store, "backend", "") == "unavailable":
+        storage["error"] = str(getattr(store, "error", "unavailable"))
+        storage["settlement_disabled"] = True
+
     return {
-        "status": "ok",
+        "status": "degraded" if storage.get("settlement_disabled") else "ok",
         "paypal": {
             "configured": settings.paypal.configured,
             "environment": settings.paypal.environment,
             "mode": engine.settlement_mode,
+            "require_real": settings.require_real_paypal,
         },
         "llm": {
             "configured": settings.llm.configured,
@@ -70,10 +82,7 @@ def health() -> dict[str, Any]:
         "sellers": default_seller_ids(),
         # Which persistence is actually in use, so a deployment can never be
         # mistaken for durable when it is not.
-        "storage": {
-            "backend": getattr(engine.store, "backend", "unknown"),
-            "durable": bool(getattr(engine.store, "durable", False)),
-        },
+        "storage": storage,
     }
 
 
@@ -156,6 +165,23 @@ async def approve_job(job_id: str) -> dict[str, Any]:
         )
     completed = await asyncio.to_thread(engine.approve_and_hold, job)
     return _job_full(completed)
+
+
+@router.post("/jobs/{job_id}/reconcile")
+async def reconcile_job(job_id: str) -> dict[str, Any]:
+    """Resolve a job whose settlement outcome was never determined.
+
+    Only reads PayPal to establish what actually happened, so it is safe to call
+    repeatedly. Returns 409 for a job that is not in the unresolved state.
+    """
+    job = _job_or_404(job_id)
+    if job.escrow.state is not EscrowState.UNRESOLVED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is not unresolved (escrow state {job.escrow.state.value})",
+        )
+    reconciled = await asyncio.to_thread(engine.reconcile_job, job)
+    return _job_full(reconciled)
 
 
 @router.get("/jobs/{job_id}")

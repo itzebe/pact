@@ -275,6 +275,22 @@ class PostgresReputationLedger:
     def record_failed(self, agent_id: str) -> dict:
         return self._mutate(agent_id, lambda r: r.__setitem__("failed", r["failed"] + 1))
 
+    def record_reconciled(self, agent_id: str, amount: float) -> dict:
+        """Correct an earlier unresolved outcome once PayPal confirms the payment.
+
+        Mirrors the filesystem ledger: the failure recorded while the outcome was
+        unknown is reversed and the settlement credited, so reputation does not
+        contradict a ledger that says the money moved.
+        """
+
+        def apply(record: dict) -> None:
+            record["failed"] = max(0, record["failed"] - 1)
+            record["settled"] += 1
+            record["volume"] = round(record["volume"] + float(amount), 2)
+            record["last_settled_at"] = datetime.now(timezone.utc).isoformat()
+
+        return self._mutate(agent_id, apply)
+
     @staticmethod
     def score(record: dict) -> float:
         settled = record.get("settled", 0)

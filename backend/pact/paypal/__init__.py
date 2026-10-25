@@ -56,10 +56,21 @@ class EscrowBackend(Protocol):
 
 
 def build_escrow_client() -> EscrowBackend:
-    """Return a live client when credentials exist, else a clearly-marked mock."""
+    """Return a live client when credentials exist, else a clearly-marked mock.
+
+    ``PACT_REQUIRE_REAL_PAYPAL`` makes the absence of credentials a hard startup
+    failure. Without it, a production deployment could silently settle against the
+    in-memory double and report a "settled" job for which no money ever moved.
+    """
     if settings.paypal.configured:
         log.info("PayPal escrow client using %s credentials", settings.paypal.environment)
         return PayPalEscrowClient()
+    if settings.require_real_paypal:
+        raise PayPalError(
+            "PACT_REQUIRE_REAL_PAYPAL is set but no PayPal credentials were found. "
+            "Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET, or unset "
+            "PACT_REQUIRE_REAL_PAYPAL to allow simulated settlement."
+        )
     if settings.allow_mock_paypal:
         log.warning(
             "No PayPal credentials found; running against the in-memory mock. "
