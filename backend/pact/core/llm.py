@@ -50,6 +50,32 @@ class LLM(Protocol):
     def complete_json(self, system: str, user: str, *, max_tokens: int = 800) -> dict[str, Any]: ...
 
 
+_TRUE_TOKENS = frozenset({"true", "yes", "y", "1", "pass", "passed"})
+_FALSE_TOKENS = frozenset({"false", "no", "n", "0", "fail", "failed"})
+
+
+def as_bool(value: Any) -> bool:
+    """Interpret a model-supplied boolean strictly, failing closed when unsure.
+
+    ``bool("false")`` is ``True`` in Python, so coercing model output with ``bool``
+    reads an explicit refusal as an affirmation. On the settlement path that is
+    fail-open: a verifier that wrote ``"passed": "false"`` would release the
+    buyer's money for a delivery it had just rejected. Only an unambiguous
+    affirmative is True; everything else, including anything unparseable, is False.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _TRUE_TOKENS:
+            return True
+        if token in _FALSE_TOKENS:
+            return False
+    return False
+
+
 def _extract_json(text: str) -> dict[str, Any]:
     """Pull a JSON object out of a model response, fenced or bare."""
     candidates: list[str] = []

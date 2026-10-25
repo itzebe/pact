@@ -32,7 +32,7 @@ from ..paypal.escrow import (
     _parse_capture,
     approval_url,
 )
-from .llm import LLM, LLMError
+from .llm import LLM, LLMError, as_bool
 from .models import (
     IN_FLIGHT_CAPTURE,
     CriterionResult,
@@ -158,7 +158,7 @@ def _parse_verification(raw: dict, criteria: list[str]) -> Verification:
         results.append(
             CriterionResult(
                 criterion=str(item.get("criterion", ""))[:300],
-                passed=bool(item.get("passed", False)),
+                passed=as_bool(item.get("passed", False)),
                 evidence=str(item.get("evidence", ""))[:600],
             )
         )
@@ -168,17 +168,28 @@ def _parse_verification(raw: dict, criteria: list[str]) -> Verification:
     except (TypeError, ValueError):
         score = 0.0
 
-    # A pass with no per-criterion evidence is not trustworthy; require coverage.
-    if bool(raw.get("passed")) and len(results) < max(1, len(criteria)):
-        return Verification(
-            passed=False,
-            score=score,
-            criteria=results,
-            summary="Verdict rejected: the verifier did not assess every acceptance criterion.",
-        )
+    # A pass must be supported by its own evidence. Reject a verdict that skips a
+    # criterion, or that claims an overall pass while the per-criterion findings it
+    # returned say otherwise — a self-contradicting verdict is not trustworthy, and
+    # trusting it here would release the buyer's money on the model's say-so alone.
+    if as_bool(raw.get("passed")):
+        if len(results) < max(1, len(criteria)):
+            return Verification(
+                passed=False,
+                score=score,
+                criteria=results,
+                summary="Verdict rejected: the verifier did not assess every acceptance criterion.",
+            )
+        if any(not result.passed for result in results):
+            return Verification(
+                passed=False,
+                score=score,
+                criteria=results,
+                summary="Verdict rejected: the verifier reported a pass but its own criteria findings do not support it.",
+            )
 
     return Verification(
-        passed=bool(raw.get("passed", False)),
+        passed=as_bool(raw.get("passed", False)),
         score=score,
         criteria=results,
         summary=str(raw.get("summary", ""))[:600],

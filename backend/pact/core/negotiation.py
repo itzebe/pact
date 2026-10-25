@@ -14,7 +14,7 @@ import logging
 from decimal import Decimal
 
 from ..config import settings
-from .llm import LLM, LLMError
+from .llm import LLM, LLMError, as_bool
 from .models import Job, Message, Offer
 
 log = logging.getLogger("pact.negotiation")
@@ -104,7 +104,7 @@ class NegotiationEngine:
         )
 
         counter = _positive_decimal(raw.get("price"), default=min(offer.price, job.budget_max))
-        accept = bool(raw.get("accept", False))
+        accept = as_bool(raw.get("accept", False))
 
         if counter > job.budget_max:
             counter = job.budget_max
