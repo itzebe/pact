@@ -106,6 +106,37 @@ def test_json_is_extracted_from_a_fenced_block(transport):
     assert client.complete_json("sys", "user") == {"passed": True, "score": 0.9}
 
 
+def test_a_rate_limit_is_retried_then_surfaces_as_an_error(transport):
+    """429 is transient like a 5xx, so it must be retried rather than swallowed."""
+    client = OpenAICompatibleLLM(api_key="k", attempts=3)
+    transport.responses = [(429, {"error": {"message": "rate limited"}})] * 3
+    with pytest.raises(LLMError, match="after 3 attempts"):
+        client.complete("sys", "user")
+    assert len(transport.requests) == 3
+
+
+def test_a_rate_limit_that_clears_is_recovered(transport):
+    client = OpenAICompatibleLLM(api_key="k", attempts=3)
+    transport.responses = [(429, {}), _ok("recovered")]
+    assert client.complete("sys", "user") == "recovered"
+
+
+def test_a_non_json_body_is_an_error_not_a_pass(transport):
+    """A malformed completion must raise, never be read as an affirmative verdict."""
+    client = OpenAICompatibleLLM(api_key="k")
+    transport.responses = [_ok("I am afraid I cannot produce JSON today.")]
+    with pytest.raises(LLMError, match="did not return a JSON object"):
+        client.complete_json("sys", "user")
+
+
+def test_a_json_body_missing_the_choices_key_is_an_error(transport):
+    """An OpenAI-shaped envelope without content must not be treated as success."""
+    client = OpenAICompatibleLLM(api_key="k", attempts=2)
+    transport.responses = [(200, {"error": {"message": "upstream failure"}})] * 2
+    with pytest.raises(LLMError):
+        client.complete("sys", "user")
+
+
 # ------------------------------------------- fail closed when the model is down
 
 
