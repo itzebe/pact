@@ -1,12 +1,15 @@
 # Keep the upload to what the build and the function actually need.
 # backend/ and frontend/ must stay: the function imports backend/pact and the
 # build command runs in frontend/.
+#
+# Deliberately not excluding docs/ — it is small, committed, and useful to
+# reviewers. Excluding a path here also excludes it from the function's file
+# tracing, so only add entries that genuinely must not ship.
 backend/.venv
 backend/.pytest_cache
 **/__pycache__
 **/*.pyc
 data
 .openhands
-docs
 *.log
 .env

@@ -8,7 +8,8 @@
     "api/index.py": {
       "memory": 1024,
       "maxDuration": 60,
-      "includeFiles": "backend/**"
+      "includeFiles": "backend/**",
+      "excludeFiles": "{backend/.venv/**,**/__pycache__/**,**/*.pyc,**/.pytest_cache/**}"
     }
   },
   "rewrites": [
