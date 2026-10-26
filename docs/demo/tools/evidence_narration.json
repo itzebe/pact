@@ -1,0 +1,6 @@
+{
+  "_comment": "Narration for the evidence segment spliced into pact-demo-enhanced.mp4. Voice: en-US-GuyNeural. The two supplied captures are PACT application screenshots, not PayPal receipts; the wording keeps that distinction explicit.",
+  "e1": "The supporting evidence: two phone captures of the settled job from the running PACT application. The first shows the outcome. Verification passed, one hundred and twenty-five dollars released to the seller.",
+  "e2": "The second shows the negotiation record: Atlas asked one hundred and forty dollars, and the buyer countered at one hundred and twenty.",
+  "e3": "These are PACT's own records, not PayPal receipts. The settlement record holds the Sandbox order, authorization, and completed capture."
+}

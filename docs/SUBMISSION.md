@@ -2,13 +2,21 @@
 
 Paste-ready text for the Devpost submission form.
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo.mp4`](demo/pact-demo.mp4)
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo-enhanced.mp4`](demo/pact-demo-enhanced.mp4)
 
-The demo video (2:25) is a screen capture of the deployed app against PayPal
+The demo video (2:57) is a screen capture of the deployed app against PayPal
 Sandbox. The settlement it shows is a real production record — order
 `9BU01766CS027323X`, authorization `7GB0704898318210B`, capture `05962303KN297374V`,
 capture status `COMPLETED`. Every identifier on screen is real; the narration is
 in [`docs/DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
+
+At 2:13 the video adds an evidence segment built from two phone captures of the
+settled job taken from the running application. Those captures are **PACT's own
+application records, not PayPal receipts** — they contain no PayPal order,
+authorization, or capture identifier — and the narration states that
+explicitly. [`docs/DEMO_EVIDENCE.md`](DEMO_EVIDENCE.md) records exactly what each
+capture does and does not establish. The pre-evidence cut remains at
+[`docs/demo/pact-demo.mp4`](demo/pact-demo.mp4).
 
 ---
 

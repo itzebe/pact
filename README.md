@@ -1,6 +1,13 @@
 # Pact
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo.mp4`](docs/demo/pact-demo.mp4) (2:25, real capture of the deployed app against PayPal Sandbox)
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo-enhanced.mp4`](docs/demo/pact-demo-enhanced.mp4) (2:57, real capture of the deployed app against PayPal Sandbox, with an evidence segment at 2:13)
+
+The evidence segment shows two phone captures of the settled job taken from the
+running application. They are PACT's own application records — **not PayPal
+receipts** — and the narration says so. See
+[`docs/DEMO_EVIDENCE.md`](docs/DEMO_EVIDENCE.md) for what each capture does and
+does not establish. The pre-evidence cut remains at
+[`docs/demo/pact-demo.mp4`](docs/demo/pact-demo.mp4).
 
 **Settlement infrastructure for the agent economy, built on PayPal escrow.**
 
