@@ -9,7 +9,11 @@ Checks against the rendered video:
   6. the original video is byte-unchanged
 
 Usage:
-  python verify_evidence.py <evidence_dir>
+  python verify_evidence.py <evidence_dir> [video]
+
+`video` defaults to the enhanced cut. Pass the final (pause-compressed) cut and
+the sample times are mapped onto it automatically, because the final cut only
+removes silence.
 """
 from __future__ import annotations
 
@@ -22,15 +26,49 @@ from PIL import Image, ImageChops, ImageStat
 
 ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "docs" / "demo"
-VID = DEMO / "pact-demo-enhanced.mp4"
+ENHANCED = DEMO / "pact-demo-enhanced.mp4"
 ORIG = DEMO / "pact-demo.mp4"
+MAX_SECONDS = 180.0
 
 FF = subprocess.run([sys.executable, "-c",
                      "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())"],
                     capture_output=True, text=True).stdout.strip()
 
+
+def media_duration(path: Path) -> float:
+    err = subprocess.run([FF, "-hide_banner", "-i", str(path)],
+                         capture_output=True, text=True).stderr
+    line = [l for l in err.splitlines() if "Duration" in l][0]
+    h, m, sec = line.split("Duration:")[1].split(",")[0].strip().split(":")
+    return int(h) * 3600 + int(m) * 60 + float(sec)
+
+
+def build_time_map() -> None:
+    """Map enhanced-cut times onto the final cut by dropping shortened pauses."""
+    global _TIME_MAP
+    if VID == ENHANCED:
+        _TIME_MAP = None
+        return
+    sys.path.insert(0, str(Path(__file__).parent))
+    import trim_pauses as tp
+    total = tp.duration(str(ENHANCED))
+    keep = tp.keep_intervals(tp.silences(str(ENHANCED), -35, 0.45), 0.65, total)
+    _TIME_MAP = keep
+
+
+def at(t: float) -> float:
+    """Translate an enhanced-cut time to the video under test."""
+    if _TIME_MAP is None:
+        return t
+    return sum(max(0.0, min(e, t) - s) for s, e in _TIME_MAP if s < t)
+
 SB, PANE_X, PANE_Y, PANE_H, PANE_W = 90, 64, 150, 660, 1472
 SPLICE_A, SPLICE_B, FPS = 81.0, 155.7, 30
+
+# Sample times below are expressed on the enhanced cut. When verifying the final
+# cut, the same content sits earlier because the pauses were shortened.
+VID = ENHANCED
+_TIME_MAP = None
 
 # card -> (screenshot, whole-column width, sample time inside the card)
 CARDS = {
@@ -107,18 +145,24 @@ def embedded(evidence: Path, shot: str, col_w: int, t: float) -> float:
 
 
 def main() -> int:
+    global VID
     evidence = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/ev3")
+    if len(sys.argv) > 2:
+        VID = Path(sys.argv[2])
+    build_time_map()
     bad = 0
+    print(f"video under test: {VID}")
 
     print("1. each supplied screenshot is embedded (pixel match)")
     for card, (shot, col_w, t) in CARDS.items():
-        mad = embedded(evidence, shot, col_w, t)
+        mad = embedded(evidence, shot, col_w, at(t))
         ok = mad < 20
         bad += not ok
         print(f"   {card} <- {shot}: MAD={mad:.1f} -> {'MATCH' if ok else 'NO MATCH'}")
 
     print("2. evidence values readable in the render")
-    for card, (t, col_w, vals) in VALUES.items():
+    for card, (t0, col_w, vals) in VALUES.items():
+        t = at(t0)
         # A value counts as readable if it is legible in either column: some
         # short words sit in the whole-screenshot column only.
         if card == "card_s":
@@ -130,7 +174,7 @@ def main() -> int:
         print(f"   {card} (t={t}s): {'ALL PRESENT' if not miss else 'MISSING ' + str(miss)}")
 
     print("3. redaction holds (payment-method details not legible)")
-    p_txt = (ocr(frame(86.0)) + ocr(enlarged(86.0, 440), "6")).lower()
+    p_txt = (ocr(frame(at(86.0))) + ocr(enlarged(at(86.0), 440), "6")).lower()
     leaked = [r for r in REDACTED if r.lower() in p_txt]
     bad += bool(leaked)
     print(f"   leaked: {leaked if leaked else 'none'}")
@@ -138,7 +182,7 @@ def main() -> int:
     print("4. Sandbox labelled as Sandbox")
     checks = {"sandbox label": "sandbox" in p_txt,
               "sandbox env host": "sandbox.paypal.com" in p_txt,
-              "not-a-receipt note": "not a paypal receipt" in ocr(frame(96.0)).lower()}
+              "not-a-receipt note": "not a paypal receipt" in ocr(frame(at(96.0))).lower()}
     for k, v in checks.items():
         bad += not v
         print(f"   {k}: {'yes' if v else 'NO'}")
@@ -172,6 +216,15 @@ def main() -> int:
     ok = orig_sha == expected
     bad += not ok
     print(f"   pact-demo.mp4 sha256: {orig_sha[:16]}... {'OK' if ok else 'CHANGED'}")
+
+    d = media_duration(VID)
+    if VID != ENHANCED:
+        # The enhanced cut is the intermediate; only the submission cut is gated.
+        print("7. duration under three minutes")
+        ok = d < MAX_SECONDS
+        bad += not ok
+        print(f"   {VID.name}: {d:.2f}s ({int(d // 60)}:{d % 60:04.1f}) -> "
+              f"{'UNDER 180s' if ok else 'OVER 180s'}")
 
     print("\nRESULT:", "PASS" if not bad else f"FAIL ({bad} problem(s))")
     return 1 if bad else 0
