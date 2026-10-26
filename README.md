@@ -1,10 +1,13 @@
 # Pact
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo-enhanced.mp4`](docs/demo/pact-demo-enhanced.mp4) (2:57, real capture of the deployed app against PayPal Sandbox, with an evidence segment at 2:13)
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo-enhanced.mp4`](docs/demo/pact-demo-enhanced.mp4) (3:06, real capture of the deployed app against PayPal Sandbox, with two evidence segments at 1:21 and 2:36)
 
-The evidence segment shows two phone captures of the settled job taken from the
-running application. They are PACT's own application records — **not PayPal
-receipts** — and the narration says so. See
+The evidence segments show three supplied captures: a genuine PayPal **Sandbox**
+receipt ($125.00, transaction `1T8850007E538313C`), and two phone captures of the
+settled job taken from the running application. The two phone captures are PACT's
+own application records — **not PayPal receipts** — and the narration says so. The
+receipt and PACT's record share no identifier, so they are reported as
+*consistent*, not as the same transaction. See
 [`docs/DEMO_EVIDENCE.md`](docs/DEMO_EVIDENCE.md) for what each capture does and
 does not establish. The pre-evidence cut remains at
 [`docs/demo/pact-demo.mp4`](docs/demo/pact-demo.mp4).

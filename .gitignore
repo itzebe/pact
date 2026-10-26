@@ -29,3 +29,6 @@ dist/
 # Agent working state — not part of the project
 .openhands/
 .vercel
+
+# Local evidence build workspace (holds the un-redacted receipt; never commit).
+.evidence-work/

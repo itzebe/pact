@@ -1,131 +1,129 @@
-"""Compose the three evidence cards used in docs/demo/pact-demo-enhanced.mp4.
+"""Compose the evidence cards for the PACT demo (1600x900).
 
-Inputs are the two supplied PACT application captures
-(docs/demo/evidence/pact-capture-outcome.png and -negotiation.png). Nothing is
-redrawn: cards crop and scale the original pixels, and label them as
-application records rather than PayPal receipts.
+Cards crop and scale the supplied screenshots; nothing is redrawn. Crop boxes
+are in *body* coordinates, i.e. after the 90px device status bar is dropped.
 
-Run:  python evidence_cards.py            # writes cards into ./evidence-cards
+Usage:
+  python evidence_cards.py <evidence_dir> <out_dir>
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
-ROOT = Path(__file__).resolve().parents[3]
-EVIDENCE = ROOT / "docs" / "demo" / "evidence"
-OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("evidence-cards")
+sys.path.insert(0, str(Path(__file__).parent))
+from evidence_design import (ACCENT, FAINT, INK, MONO, PANE_H, PANE_W, PANE_X,
+                             PANE_Y, PANEL, REG, SAND, bordered, canvas, f,
+                             marks, phone_body)
 
-W, H = 1600, 900
-BG, PANEL = (8, 9, 12), (17, 20, 27)
-INK, DIM, FAINT, ACCENT = (238, 241, 246), (139, 151, 168), (111, 123, 143), (96, 165, 250)
-BOLD, REG = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", \
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-
-PANE = (64, 150, 1472, 660)
-PANE_X, PANE_Y, PANE_H = PANE[0], PANE[1], PANE[3]
-LEFT_W, GAP, RIGHT_W = 600, 32, 840
-RIGHT_X = PANE_X + LEFT_W + GAP
-STATUS_BAR = 90          # device clock/carrier/battery; dropped, not part of the evidence
-
-S1 = EVIDENCE / "pact-capture-outcome.png"
-S2 = EVIDENCE / "pact-capture-negotiation.png"
+GAP = 32
+SB = 90
 
 
-def f(path: str, size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(path, size)
+def whole(path: Path, width: int, regions=(), col=ACCENT) -> Image.Image:
+    body = phone_body(path, SB)
+    sc = min((width - 8) / body.width, PANE_H / body.height)
+    im = body.resize((round(body.width * sc), round(body.height * sc)), Image.LANCZOS)
+    c = Image.new("RGB", (width, PANE_H), PANEL)
+    ox, oy = (width - im.width) // 2, (PANE_H - im.height) // 2
+    c.paste(im, (ox, oy))
+    if regions:
+        marks(c, (0, 0, body.width, body.height), sc, ox, oy, regions, col=col, r=6)
+    return bordered(c, "Whole screenshot")
 
 
-def card(headline: str, eyebrow: str, caption: str, note: str) -> Image.Image:
-    im = Image.new("RGB", (W, H), BG)
-    d = ImageDraw.Draw(im)
-    d.text((64, 42), eyebrow.upper(), font=f(REG, 21), fill=FAINT)
-    d.text((64, 74), headline, font=f(BOLD, 38), fill=INK)
-    d.rectangle([PANE_X - 1, PANE_Y - 1, PANE_X + PANE[2], PANE_Y + PANE_H],
-                outline=(38, 44, 56), width=2)
-    d.text((64, 832), caption, font=f(REG, 20), fill=DIM)
-    d.text((64, 860), note, font=f(REG, 20), fill=FAINT)
-    return im
+def detail_n(path: Path, width: int, boxes, regions=(), col=ACCENT,
+             gap: int = 14) -> Image.Image:
+    """N enlarged strips stacked, scaled so the stack always fits the pane."""
+    body = phone_body(path, SB)
+    src_w = max(b[2] - b[0] for b in boxes)
+    sc = width / src_w
+    heights = [round((b[3] - b[1]) * sc) for b in boxes]
+    total = sum(heights) + gap * (len(boxes) - 1)
+    if total > PANE_H:
+        sc *= (PANE_H - gap * (len(boxes) - 1)) / sum(heights)
+        heights = [round((b[3] - b[1]) * sc) for b in boxes]
+        total = sum(heights) + gap * (len(boxes) - 1)
+    c = Image.new("RGB", (width, PANE_H), PANEL)
+    oy = (PANE_H - total) // 2
+    for box, h in zip(boxes, heights):
+        strip = body.crop(box).resize((round((box[2] - box[0]) * sc), h), Image.LANCZOS)
+        c.paste(strip, (0, oy))
+        if regions:
+            marks(c, box, sc, 0, oy, regions, col=col, r=8)
+        oy += h + gap
+    return bordered(c, "Enlarged")
 
 
-def inset(path: Path, region, label: str) -> Image.Image:
-    """Whole phone capture with the enlarged region outlined."""
-    full = Image.open(path).convert("RGB").crop((0, STATUS_BAR, 720, 1612))
-    sc = PANE_H / full.height
-    body = full.resize((round(full.width * sc), PANE_H), Image.LANCZOS)
-    canvas = Image.new("RGB", (LEFT_W, PANE_H), PANEL)
-    ox = (LEFT_W - body.width) // 2
-    canvas.paste(body, (ox, 0))
-    d = ImageDraw.Draw(canvas)
-    x0, y0, x1, y1 = region
-    d.rectangle([ox + round(x0 * sc), round((y0 - STATUS_BAR) * sc),
-                 ox + round(x1 * sc), round((y1 - STATUS_BAR) * sc)], outline=ACCENT, width=3)
-    d.rectangle([ox, 0, ox + body.width - 1, PANE_H - 1], outline=(44, 51, 64), width=2)
-    d.text((10, 10), label, font=f(REG, 22), fill=ACCENT)
-    return canvas
-
-
-def detail(path: Path, box, highlights, label: str) -> Image.Image:
-    im = Image.open(path).convert("RGB").crop(box)
-    sc = RIGHT_W / im.width
-    assert im.height * sc <= PANE_H, f"crop too tall: {im.height * sc:.0f}px"
-    im = im.resize((RIGHT_W, round(im.height * sc)), Image.LANCZOS)
-    d = ImageDraw.Draw(im)
-    for hx0, hy0, hx1, hy1 in highlights:
-        d.rounded_rectangle(
-            [round((hx0 - box[0]) * sc) - 8, round((hy0 - box[1]) * sc) - 8,
-             round((hx1 - box[0]) * sc) + 8, round((hy1 - box[1]) * sc) + 8],
-            radius=10, outline=ACCENT, width=4)
-    d.text((10, 10), label, font=f(REG, 22), fill=ACCENT)
-    return im
-
-
-def build(out: Path, headline, eyebrow, caption, note, src, region, highlights) -> None:
-    im = card(headline, eyebrow, caption, note)
-    im.paste(inset(src, region, "Whole capture"), (PANE_X, PANE_Y))
-    im.paste(detail(src, region, highlights, "Enlarged"), (RIGHT_X, PANE_Y))
-    im.save(out)
+def build(out: Path, name, eyebrow, headline, caption, note, whole_img,
+          detail_img, eyebrow_col=FAINT, note_col=FAINT) -> None:
+    im = canvas(eyebrow, headline, caption, note, eyebrow_col, note_col)
+    im.paste(whole_img, (PANE_X, PANE_Y))
+    im.paste(detail_img, (PANE_X + whole_img.width + GAP, PANE_Y))
+    im.save(out / f"{name}.png")
+    print(f"  {name}.png")
 
 
 def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+    src = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/ev3")
+    out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/tmp/ev3/build")
+    out.mkdir(parents=True, exist_ok=True)
 
-    build(OUT / "card_a.png",
-          "Settled job: outcome and escrow release",
-          "Evidence 1 of 2  ·  PACT application capture",
-          "Phone capture of pact-flame.vercel.app. PACT's own record of the settled job.",
-          "This is the application's record, not a PayPal receipt.",
-          S1, (60, 855, 660, 1300),
-          [(105, 918, 252, 956), (160, 1178, 224, 1210), (398, 1153, 558, 1200)])
+    P = src / "s3_redacted.png"      # genuine PayPal Sandbox receipt
+    N = src / "s2.png"               # PACT negotiation capture
+    O = src / "s1.png"               # PACT settled-outcome capture
 
-    build(OUT / "card_b.png",
+    build(out, "card_p",
+          "Evidence 1 of 3  ·  PayPal Sandbox",
+          "PayPal Sandbox — $125.00 Payment Record",
+          "PayPal Sandbox receipt (test environment, sandbox.paypal.com) supplied as evidence.",
+          "Sandbox test payment — no real money moved. Payment method and contact details redacted.",
+          whole(P, 440, regions=[(126, 110, 694, 216), (50, 790, 412, 900),
+                                 (198, 1240, 694, 1360)]),
+          detail_n(P, 1000,
+                   [(40, 110, 700, 230), (40, 790, 700, 910), (40, 1240, 700, 1470)],
+                   regions=[(500, 126, 694, 174), (126, 178, 578, 218),
+                            (50, 856, 412, 900), (198, 1300, 694, 1356)]),
+          eyebrow_col=SAND, note_col=SAND)
+
+    build(out, "card_n",
+          "Evidence 2 of 3  ·  PACT application capture",
           "Negotiation record",
-          "Evidence 2 of 2  ·  PACT application capture",
-          "Phone capture of pact-flame.vercel.app. Consistent with the settled job above: "
-          "same $200 ceiling and seller Atlas.",
-          "Shows the negotiation record only; it is not payment evidence.",
-          S2, (60, 380, 660, 850),
-          [(485, 483, 598, 519), (485, 771, 598, 807)])
+          "Phone capture of pact-flame.vercel.app: round-one ask and the buyer's counter.",
+          "PACT's own application record — not a PayPal receipt.",
+          whole(N, 600),
+          detail_n(N, 840, [(60, 380, 660, 850)],
+                   regions=[(485, 483, 598, 519), (485, 771, 598, 807)]))
 
-    c = card("PACT's settlement record",
-             "Application record  ·  not a PayPal receipt",
-             "The escrow objects PACT holds for the settled job, served live from production.",
-             "No PayPal screenshot was supplied for this job.")
-    rec = Image.new("RGB", (PANE[2], 430), PANEL)
+    build(out, "card_o",
+          "Evidence 3 of 3  ·  PACT application capture",
+          "Settled job: outcome and escrow release",
+          "Phone capture of pact-flame.vercel.app: verification passed, $125.00 released to the seller.",
+          "PACT's own application record — not a PayPal receipt.",
+          whole(O, 600),
+          detail_n(O, 840, [(60, 855, 660, 1300)],
+                   regions=[(105, 918, 252, 956), (160, 1178, 224, 1210),
+                            (398, 1153, 558, 1200)]))
+
+    c = canvas("PACT application record  ·  not a PayPal receipt",
+               "PACT's settlement record",
+               "The escrow objects PACT holds for the settled job, served live from production.",
+               "A different purpose from the receipt: this is PACT's own audit record, not PayPal's.")
+    rec = Image.new("RGB", (PANE_W, 470), PANEL)
     d = ImageDraw.Draw(rec)
     rows = [("Status", "settled"), ("Escrow state", "released"),
             ("Provider / mode", "paypal / sandbox"), ("Amount", "$125.00"),
             ("Order", "9BU01766CS027323X"), ("Authorization", "7GB0704898318210B"),
             ("Capture", "05962303KN297374V"), ("Capture status", "COMPLETED")]
     for i, (k, v) in enumerate(rows):
-        y = 26 + i * 49
+        y = 26 + i * 54
         d.text((30, y), k, font=f(REG, 24), fill=FAINT)
-        d.text((340, y), v, font=f(BOLD, 25), fill=INK)
+        d.text((340, y), v, font=f(MONO, 25), fill=INK)
     c.paste(rec, (PANE_X, PANE_Y))
-    c.save(OUT / "card_c.png")
-    print(f"wrote card_a.png, card_b.png, card_c.png to {OUT}")
+    c.save(out / "card_s.png")
+    print("  card_s.png")
 
 
 if __name__ == "__main__":
