@@ -1,0 +1,7 @@
+{
+  "_comment": "Narration for the two evidence segments spliced into docs/demo/pact-demo-enhanced.mp4. Voice: en-US-GuyNeural. Segment A plays after the PayPal Sandbox checkout section; segment B after the ledger/hash-chain section. The receipt is Sandbox evidence and is described as such; the two PACT captures are described as application records, not PayPal receipts.",
+  "a1": "The payment evidence: a PayPal Sandbox receipt for one hundred and twenty-five dollars, seller Test Store. Sandbox, so no real money moved.",
+  "a2": "PACT's own record holds the PayPal order, authorization, and capture ids, and reports the capture completed. Different records, different purposes.",
+  "b1": "Two captures from the running application. The negotiation: Atlas asked one hundred and forty dollars; the buyer countered at one hundred and twenty.",
+  "b2": "The settled outcome: verification passed, one hundred and twenty-five dollars released. PACT's records, not PayPal receipts, backed by a hash-chained ledger."
+}
