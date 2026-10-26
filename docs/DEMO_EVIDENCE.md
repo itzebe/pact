@@ -1,4 +1,4 @@
-# Evidence segment in `pact-demo-enhanced.mp4`
+# Evidence segments in the demo video
 
 ## What the three supplied captures are
 
@@ -40,20 +40,26 @@ id, seller name, and order summary.
 
 ## Where the segments sit
 
-The original video is unchanged and is only read. Two segments are spliced in at
+The submission cut is `pact-demo-final.mp4` (2:52, under the three-minute cap).
+The original video is unchanged and is only read; two segments are spliced in at
 measured cuts of the original:
 
 | time | content |
 |---|---|
-| 0:00 – 1:21 | original demo, unaltered (ends with the PayPal Sandbox checkout) |
-| 1:21 – 1:42 | **Segment A** — PayPal Sandbox receipt, then PACT's settlement record |
-| 1:42 – 2:36 | original demo, unaltered (verification, then the ledger) |
-| 2:36 – 2:57 | **Segment B** — PACT's negotiation capture, then the settled-outcome capture |
-| 2:57 – 3:06 | original closing shot, unaltered |
+| 0:00 – 1:15 | original demo, unaltered (ends with the PayPal Sandbox checkout) |
+| 1:15 – 1:33 | **Segment A** — PayPal Sandbox receipt, then PACT's settlement record |
+| 1:33 – 2:24 | original demo, unaltered (verification, then the hash-chained ledger) |
+| 2:24 – 2:42 | **Segment B** — PACT's negotiation capture, then the settled-outcome capture |
+| 2:42 – 2:52 | original closing shot, unaltered |
 
-Segment A lands right after the payment section (cut at t=81.0s), so the payment
-evidence sits with the payment narrative. Segment B lands after the ledger
-section (cut at t=135.0s), before the closing shot.
+Segment A lands right after the payment section (cut at t=74.8s in this cut), so
+the payment evidence sits with the payment narrative. Segment B lands after the
+ledger section (cut at t=124.7s), before the closing shot.
+
+`pact-demo-enhanced.mp4` is the same edit before pause compression (3:06), with
+its segments at 1:21 and 2:36. `pact-demo-final.mp4` shortens the ~1s of silence
+at each sentence end to 0.65s; no spoken word, scene or card is removed, so the
+final cut is simply the enhanced cut with the dead air tightened.
 
 ## Reproducing it
 
@@ -61,13 +67,16 @@ section (cut at t=135.0s), before the closing shot.
 python docs/demo/tools/redact_receipt.py .evidence-work/s3.png .evidence-work/s3_redacted.png
 python docs/demo/tools/evidence_cards.py .evidence-work .evidence-work/build
 python docs/demo/tools/assemble_evidence.py .evidence-work/build .evidence-work/audio .evidence-work/render
-python docs/demo/tools/verify_evidence.py .evidence-work
+python docs/demo/tools/trim_pauses.py docs/demo/pact-demo-enhanced.mp4 docs/demo/pact-demo-final.mp4 0.65
+python docs/demo/tools/verify_evidence.py .evidence-work docs/demo/pact-demo-final.mp4
 ```
 
 `evidence_cards.py` crops and scales the original pixels (nothing is
-redrawn); `assemble_evidence.py` splices the cards into a copy of the original.
-Narration text lives in `evidence_narration.json`. Requires `edge-tts`,
-`imageio-ffmpeg` and `Pillow`; verification also uses `tesseract`.
+redrawn); `assemble_evidence.py` splices the cards into a copy of the original;
+`trim_pauses.py` shortens the silent gaps in both audio and video at the same
+time intervals, so they stay in sync. Narration text lives in
+`evidence_narration.json`. Requires `edge-tts`, `imageio-ffmpeg` and `Pillow`;
+verification also uses `tesseract`.
 
 ## Verification
 
@@ -75,4 +84,6 @@ Narration text lives in `evidence_narration.json`. Requires `edge-tts`,
 present pixel-for-pixel in its card; every value visible in the originals is
 legible in the render; the receipt's payment-method details stay redacted; the
 Sandbox evidence is labelled as Sandbox; no black or silent stretches were
-introduced; and `pact-demo.mp4` is byte-unchanged.
+introduced; `pact-demo.mp4` is byte-unchanged; and the submission cut is under
+180 seconds. Sample times are written against the enhanced cut and mapped onto
+the final cut automatically, since the final cut only removes silence.

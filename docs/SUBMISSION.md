@@ -2,15 +2,15 @@
 
 Paste-ready text for the Devpost submission form.
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo-enhanced.mp4`](demo/pact-demo-enhanced.mp4) (3:06, with evidence segments at 1:21 and 2:36)
+**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4) (2:52, with evidence segments at 1:15 and 2:24)
 
-The demo video (3:06) is a screen capture of the deployed app against PayPal
+The demo video (2:52) is a screen capture of the deployed app against PayPal
 Sandbox. The settlement it shows is a real production record — order
 `9BU01766CS027323X`, authorization `7GB0704898318210B`, capture `05962303KN297374V`,
 capture status `COMPLETED`. Every identifier on screen is real; the narration is
 in [`docs/DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
 
-At 1:21 and 2:36 the video adds evidence segments built from three supplied
+At 1:15 and 2:24 the video adds evidence segments built from three supplied
 captures. One is a genuine PayPal **Sandbox** receipt ($125.00, transaction
 `1T8850007E538313C`); the other two are phone captures of the settled job taken
 from the running application. The two phone captures are **PACT's own application
