@@ -690,11 +690,23 @@ def test_an_invalid_key_is_a_503_not_a_traceback(monkeypatch):
 # ------------------------------------------------------- SSE ticket is single-use
 
 
-def test_a_stream_ticket_is_single_use(client):
-    """The docstring says single-use; a replay must be refused."""
-    from pact.api import auth as auth_module
+@pytest.fixture()
+def memory_ticket_store(monkeypatch):
+    """A fresh process-local ticket registry, so cases do not leak into each other.
 
-    auth_module._consumed_tickets.clear()
+    These tests run without ``DATABASE_URL``, so the module-level store is the
+    in-memory one; installing a new one per test is how each case starts clean.
+    """
+    from pact.api import auth as auth_module
+    from pact.core.ticket_store import InMemoryTicketStore
+
+    store = InMemoryTicketStore()
+    monkeypatch.setattr(auth_module, "ticket_store", store)
+    return store
+
+
+def test_a_stream_ticket_is_single_use(client, memory_ticket_store):
+    """The docstring says single-use; a replay must be refused."""
     job_id = _create(client)
     ticket = client.post(f"/api/jobs/{job_id}/stream-ticket", headers=BUYER).json()["ticket"]
     first = client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}")
@@ -703,16 +715,13 @@ def test_a_stream_ticket_is_single_use(client):
     assert second.status_code == 401, "a consumed ticket must not be replayable"
 
 
-def test_the_consumption_registry_is_atomic():
-    from pact.api import auth as auth_module
-
-    auth_module._consumed_tickets.clear()
+def test_the_consumption_registry_is_atomic(memory_ticket_store):
     results: list[bool] = []
     barrier = threading.Barrier(8)
 
     def consume() -> None:
         barrier.wait(timeout=5)
-        results.append(auth_module._consume_ticket("one-shot", 60))
+        results.append(memory_ticket_store.consume("one-shot", 60))
 
     threads = [threading.Thread(target=consume) for _ in range(8)]
     for t in threads:
@@ -722,13 +731,61 @@ def test_the_consumption_registry_is_atomic():
     assert results.count(True) == 1
 
 
-def test_the_consumed_ticket_registry_stays_bounded():
+def test_the_consumed_ticket_registry_stays_bounded(memory_ticket_store):
     """A consumed id must be pruned once its window closes, or the map leaks."""
-    from pact.api import auth as auth_module
-
-    auth_module._consumed_tickets.clear()
-    assert auth_module._consume_ticket("already-closed", 0) is True
+    assert memory_ticket_store.consume("already-closed", 0) is True
     # The next call prunes the entry whose window has already elapsed.
-    assert auth_module._consume_ticket("still-open", 60) is True
-    assert "already-closed" not in auth_module._consumed_tickets
-    assert "still-open" in auth_module._consumed_tickets
+    assert memory_ticket_store.consume("still-open", 60) is True
+    assert memory_ticket_store.size() == 1
+
+
+def test_an_expired_ticket_is_rejected(client, memory_ticket_store):
+    """A ticket past its ``exp`` must not open the stream, consumed or not."""
+    import jwt as pyjwt
+
+    from pact.api.auth import STREAM_TICKET_TTL, stream_scope
+    from pact.config import settings as live_settings
+
+    job_id = _create(client)
+    issued = datetime.now(timezone.utc) - timedelta(seconds=120)
+    expired = pyjwt.encode(
+        {
+            "sub": "buyer",
+            "role": "buyer",
+            "scope": stream_scope(job_id),
+            "jti": "expired-jti",
+            "iat": int(issued.timestamp()),
+            "exp": int((issued + STREAM_TICKET_TTL).timestamp()),
+        },
+        live_settings.auth.secret,
+        algorithm="HS256",
+    )
+    response = client.get(f"/api/jobs/{job_id}/stream?ticket={expired}")
+    assert response.status_code == 401, response.text
+    assert memory_ticket_store.size() == 0, "an expired ticket must not be recorded"
+
+
+def test_an_unavailable_shared_store_fails_closed(client, monkeypatch):
+    """With a shared store configured but unreachable, no ticket may be accepted.
+
+    Falling back to the process-local registry here would silently reopen the
+    cross-instance replay hole, so every ticket must be refused instead.
+    """
+    from pact.api import auth as auth_module
+    from pact.core.ticket_store import UnavailableTicketStore
+
+    monkeypatch.setattr(
+        auth_module, "ticket_store", UnavailableTicketStore(RuntimeError("connection refused"))
+    )
+    job_id = _create(client)
+    ticket = client.post(f"/api/jobs/{job_id}/stream-ticket", headers=BUYER).json()["ticket"]
+    response = client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}")
+    assert response.status_code == 401, response.text
+
+
+def test_a_healthy_shared_store_still_admits_the_first_redemption(client, memory_ticket_store):
+    """Negative control for the fail-closed case: the guard must not refuse everything."""
+    job_id = _create(client)
+    ticket = client.post(f"/api/jobs/{job_id}/stream-ticket", headers=BUYER).json()["ticket"]
+    assert client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}").status_code == 200
+

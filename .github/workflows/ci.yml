@@ -1,0 +1,172 @@
+name: CI
+
+# Runs on every pull request into master and on pushes to the security branch.
+# A push to master is covered transitively: master only receives commits through
+# a reviewed pull request that already ran this workflow.
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [security/pact-prelaunch-hardening]
+
+# Least privilege: these jobs only read the repository. No job needs a token that
+# can write, and none is given one.
+permissions:
+  contents: read
+
+# A new push supersedes an in-flight run for the same ref, so CI minutes are not
+# spent on a commit that is already stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python ${{ env.PYTHON_VERSION }} + PostgreSQL 16)
+    runs-on: ubuntu-24.04
+    # Postgres 16 is the version the tests are written against. The service
+    # container is the only database the suite may use, and DATABASE_URL points at
+    # it so the Postgres integration tests execute instead of skipping.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pact
+          POSTGRES_PASSWORD: pact
+          POSTGRES_DB: pact
+        ports:
+          - 5432:5432
+        # Fail the job rather than start the tests against a database that is not
+        # yet accepting connections.
+        options: >-
+          --health-cmd "pg_isready -U pact -d pact"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTHON_VERSION: "3.11"
+      # Matches the service container above. Not a secret: it is a throwaway
+      # database that exists only for the duration of the job.
+      DATABASE_URL: postgresql://pact:pact@localhost:5432/pact
+      PACT_ENV: test
+      PACT_ALLOW_MOCK_PAYPAL: "true"
+      PACT_AUTH_SECRET: ci-only-signing-secret-not-used-anywhere-real
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]" pyflakes
+
+      # A guard, not a convenience: if the database were unreachable the Postgres
+      # tests would skip themselves and the suite would look green while the
+      # cross-instance guarantees went unexercised. This fails the job instead.
+      - name: Assert the database is reachable
+        working-directory: backend
+        run: python -c "import psycopg; psycopg.connect('$DATABASE_URL').close()"
+
+      - name: Run the backend test suite
+        working-directory: backend
+        run: python -m pytest tests/ -q
+
+      # Prove the Postgres integration tests actually ran. ``test_postgres_store``
+      # and ``test_ticket_store_postgres`` are the cross-instance safety net; a
+      # skip means that net is not deployed, which is a failure, not a pass.
+      - name: Assert the PostgreSQL tests were not skipped
+        working-directory: backend
+        run: |
+          python -m pytest tests/test_postgres_store.py tests/test_ticket_store_postgres.py \
+            -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
+          cat pg-tests.log
+          if grep -Eq "[0-9]+ skipped" pg-tests.log; then
+            echo "::error::PostgreSQL integration tests were skipped; they must run in CI."
+            exit 1
+          fi
+
+      - name: Lint with pyflakes
+        working-directory: backend
+        run: python -m pyflakes pact/ scripts/
+
+  frontend:
+    name: Frontend (Node ${{ env.NODE_VERSION }})
+    runs-on: ubuntu-24.04
+    env:
+      NODE_VERSION: "20"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Install from the committed lockfile, so a build is reproducible and a
+          # dependency bump cannot slip in unnoticed.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Build the production bundle
+        working-directory: frontend
+        run: npm run build
+
+  docker:
+    name: Docker (production image)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Builds the actual Dockerfile — the same image the deployment runs — with
+      # the repository's own build cache. It is never pushed and no registry
+      # credentials are used.
+      - name: Build the production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: pact:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A green build only proves the layers built. This proves the image is a
+      # working application: it must start and answer its own health check.
+      - name: Verify the image starts and serves /api/health
+        run: |
+          docker run -d --name pact-ci \
+            -e PACT_ENV=test \
+            -e PACT_ALLOW_MOCK_PAYPAL=true \
+            -e PACT_AUTH_SECRET=ci-only-signing-secret-not-used-anywhere-real \
+            -e PACT_ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -p 8000:8000 pact:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then
+              echo "health check passed"
+              curl -fsS http://127.0.0.1:8000/api/health
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the container did not become healthy in time"
+          docker logs pact-ci
+          exit 1

@@ -62,6 +62,14 @@ may still pass a full token in the `Authorization` header directly to the stream
 A scoped ticket is refused on every other route, so a leaked stream URL is not a
 reusable credential.
 
+A ticket is also **single-use**, and that is decided in the shared database rather
+than in the process that minted it. A replay that lands on another instance — the
+normal case behind a load balancer — finds the ticket already consumed and is
+refused. Where no `DATABASE_URL` is configured the registry is process-local,
+which is correct only because such a deployment is single-instance by
+construction. If a shared store is configured but unreachable, every ticket is
+refused rather than accepted by a local fallback no other instance can see.
+
 ## Threat model
 
 | Threat | Mitigation |
@@ -72,6 +80,7 @@ reusable credential.
 | A compromised buyer token escalating to admin | Reconciliation, deletion, and the provider-order view require a separate admin role. |
 | A forged `Host` becoming a PayPal return target | `PACT_PUBLIC_URL` is canonical; a fallback host must match `PACT_ALLOWED_HOSTS` or no `return_url` is produced. |
 | A stream URL leaking a money-moving credential | The stream takes a 60-second, single-job ticket, never the real token; a scoped ticket is refused everywhere else. |
+| Replaying a captured stream ticket against another instance | Consumption is recorded in the shared database with an atomic insert-and-consume, so exactly one instance can redeem a ticket; an unreachable shared store fails closed. |
 | One buyer reading every tenant's jobs and ledger | `/api/jobs` and `/api/ledger` are filtered by the caller's role and ownership. |
 | An oversized body exhausting memory before validation | A 64 KB content-length cap is enforced before the body is parsed. |
 | Duplicate capture from concurrent requests | The job is claimed atomically (a lease on the filesystem store, an advisory lock on Postgres) before any provider call. |

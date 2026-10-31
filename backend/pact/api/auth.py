@@ -23,7 +23,6 @@ Credentials are minted with ``scripts/issue_token.py``. See ``docs/AUTH.md``.
 from __future__ import annotations
 
 import logging
-import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ from typing import Annotated, Any
 from fastapi import Depends, Header, HTTPException, Query, status
 
 from ..config import ALLOWED_AUTH_ALGORITHMS, settings
+from ..core.ticket_store import ticket_store
 
 log = logging.getLogger("pact.auth")
 
@@ -61,31 +61,19 @@ def stream_scope(job_id: str) -> str:
 # Consumed stream-ticket ids, so a ticket is single-use. A ticket travels in a URL
 # (server logs, browser history, a shared link), and the frontend reconnects if a
 # stream drops — without this, a captured URL could be replayed for the ticket's
-# whole lifetime. Entries expire shortly after the ticket itself would, so the map
-# stays bounded. This is best-effort across processes: on a multi-instance host a
-# replay could still land on a different instance, which is why the ticket is also
-# short-lived and single-job-scoped.
-_consumed_tickets: dict[str, float] = {}
-_consumed_guard = threading.Lock()
-
-
+# whole lifetime. The registry lives in the shared ticket store: PostgreSQL when a
+# shared database is configured (so a replay landing on another instance is still
+# refused), and a process-local map only where the deployment is single-instance by
+# construction. See ``pact.core.ticket_store``.
 def _consume_ticket(ticket_id: str, ttl_seconds: float) -> bool:
     """Record a ticket id as used for ``ttl_seconds``. False if already consumed.
 
-    Atomic under a lock, so two concurrent connections cannot both consume the
-    same ticket. The expiry is stored on the *monotonic* clock (the same clock it
-    is pruned against), so the map stays bounded; mixing in a wall-clock value
-    would mean the prune never fires and the map would grow without limit.
-    Expired ids are pruned opportunistically on each call.
+    Delegates to the shared store, which decides the consumption atomically and
+    fails closed when a shared store is configured but unreachable. The id is
+    retained only for the ticket's remaining lifetime, so the registry stays
+    bounded.
     """
-    now = time.monotonic()
-    with _consumed_guard:
-        for key in [k for k, exp in _consumed_tickets.items() if exp <= now]:
-            del _consumed_tickets[key]
-        if ticket_id in _consumed_tickets:
-            return False
-        _consumed_tickets[ticket_id] = now + max(0.0, ttl_seconds)
-        return True
+    return ticket_store.consume(ticket_id, ttl_seconds)
 
 
 @dataclass(frozen=True)

@@ -116,7 +116,7 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 218 passed, 16 skipped (the Postgres tests skip themselves).
+# 294 passed, 38 skipped (the Postgres tests skip themselves).
 python -m pytest tests/ -q
 ```
 
@@ -129,7 +129,7 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 234 passed — nothing skipped.
+# 332 passed — nothing skipped.
 createdb pact                                          # or a Neon/Supabase/RDS URL
 export DATABASE_URL=postgresql://localhost/pact
 python -m pytest tests/ -q
@@ -146,7 +146,13 @@ Frontend unit tests (Node's built-in runner, no extra dependency):
 cd frontend && npm test
 ```
 
-234 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
+Both suites, plus pyflakes and the production Docker build, run on every pull
+request into `master` and on every push to the security branch. The backend job
+starts a real PostgreSQL 16 service and fails if the Postgres tests skip, so the
+cross-instance guarantees cannot silently go unexercised. See
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+332 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, shared single-use SSE-ticket consumption (with a four-process cross-instance race and a negative control), the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
 
 ---
 
@@ -316,6 +322,12 @@ instances may serve the same job. Two things follow, and both are handled:
   advisory lock per job and re-reads the authoritative row inside it, so two
   instances cannot both capture the same authorization. The filesystem store
   cannot do this; its `threading.RLock` only protects one process.
+- **Single-use state must be shared too.** The consumed-SSE-ticket registry also
+  moves into Postgres, so a captured stream URL cannot be replayed against a
+  different instance. With `DATABASE_URL` unset the registry is process-local,
+  which is only correct for a single-instance deployment; if the database is
+  configured but unreachable, stream tickets are refused rather than accepted
+  locally.
 
 The repository is already configured — `vercel.json` builds the frontend and
 routes `/api/*` to the FastAPI function in `api/index.py`.
