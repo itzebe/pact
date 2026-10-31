@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from .models import Job
+from ..config import settings
 
 log = logging.getLogger("pact.dbstore")
 
@@ -77,6 +78,11 @@ _IN_FLIGHT_STATUSES = [
     "verifying",
     "awaiting_approval",
 ]
+# In-flight statuses from which an expired lease means the worker died and the job
+# may be reclaimed. ``awaiting_approval`` is excluded on purpose: it is a paused
+# state waiting on the buyer, not a dead worker, and re-running it would create a
+# second PayPal order. Keep this in step with ``store.RECLAIMABLE_STATUSES``.
+_RECLAIMABLE_STATUSES = [s for s in _IN_FLIGHT_STATUSES if s != "awaiting_approval"]
 
 
 def _lock_key(job_id: str) -> int:
@@ -240,12 +246,14 @@ class PostgresJobStore:
 
     # ------------------------------------------------- cross-instance guards
 
-    def claim_run(self, job: Job, *, lease_seconds: int = 300) -> bool:
-        """Atomically move a job out of a runnable state. False means someone else won.
+    def claim_run(self, job: Job, *, lease_seconds: int = 300) -> Job | None:
+        """Atomically move a job out of a runnable state, returning the claimed job.
 
-        Reclaims a job whose execution lease has expired, so a crashed worker does
-        not wedge the job. The transition is a single conditional UPDATE, so two
-        instances cannot both claim the same job.
+        ``None`` means another worker won. Reclaims a job whose execution lease has
+        expired, so a crashed worker does not wedge the job. The transition is a
+        single conditional UPDATE, so two instances cannot both claim the same job,
+        and the row is re-read inside the same transaction so the caller works from
+        authoritative state (another instance may have changed it since).
         """
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
@@ -258,22 +266,31 @@ class PostgresJobStore:
                   AND deleted_at IS NULL
                   AND (
                         status = ANY(%s)
-                     OR (status = ANY(%s) AND run_lease_expires_at IS NOT NULL
+                     OR (status = ANY(%s) AND escrow_state = 'none'
+                         AND run_lease_expires_at IS NOT NULL
                          AND run_lease_expires_at < now())
                   )
                 RETURNING id
                 """,
-                (lease_seconds, job.id, _RUNNABLE_STATUSES, _IN_FLIGHT_STATUSES),
+                (lease_seconds, job.id, _RUNNABLE_STATUSES, _RECLAIMABLE_STATUSES),
             )
-            return cur.fetchone() is not None
+            if cur.fetchone() is None:
+                return None
+            # Re-read inside the same connection so the caller gets a record whose
+            # doc agrees with the columns the claim just moved (the UPDATE touches
+            # columns only). Autocommit means the update is already visible here.
+            return self._load(conn, job.id)
 
-    def claim_approval(self, job: Job) -> bool:
+    def claim_approval(self, job: Job, *, ttl_seconds: int | None = None) -> bool:
         """Atomically claim the buyer-approval transition. False means someone else won.
 
         The claim is keyed off the *escrow* state, not the job status: a first
         attempt that PayPal rejected before approval leaves the job FAILED but the
-        order still awaiting approval, and that attempt must remain retryable.
+        order still awaiting approval, and that attempt must remain retryable. A
+        claim older than ``ttl_seconds`` is treated as abandoned, so a worker that
+        died between claiming and returning does not lock the buyer out.
         """
+        ttl = settings.approval_claim_ttl_seconds if ttl_seconds is None else ttl_seconds
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -281,10 +298,13 @@ class PostgresJobStore:
                 SET approval_claimed_at = now(), updated_at = now()
                 WHERE id = %s AND deleted_at IS NULL
                   AND escrow_state = 'awaiting_approval'
-                  AND approval_claimed_at IS NULL
+                  AND (
+                        approval_claimed_at IS NULL
+                     OR approval_claimed_at < now() - make_interval(secs => %s)
+                  )
                 RETURNING id
                 """,
-                (job.id,),
+                (job.id, ttl),
             )
             return cur.fetchone() is not None
 

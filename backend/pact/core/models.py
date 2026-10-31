@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -178,6 +178,17 @@ class Job(BaseModel):
         if self.run_lease_expires_at is None:
             return False
         return (at or now()) < self.run_lease_expires_at
+
+    def approval_claim_is_live(self, ttl_seconds: int, at: datetime | None = None) -> bool:
+        """Whether a buyer-approval claim is still within its retry window.
+
+        A claim older than ``ttl_seconds`` is treated as abandoned (the worker
+        that took it died), so the buyer can approve the order again. ``None``
+        means no claim is outstanding.
+        """
+        if self.approval_claimed_at is None:
+            return False
+        return (at or now()) < self.approval_claimed_at + timedelta(seconds=ttl_seconds)
 
     @property
     def is_deleted(self) -> bool:

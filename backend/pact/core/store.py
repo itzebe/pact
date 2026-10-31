@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -20,6 +21,40 @@ from ..config import settings
 from .models import EscrowState, Job, JobStatus
 
 log = logging.getLogger("pact.store")
+
+
+def redact_credentials(text: str) -> str:
+    """Mask any ``scheme://user:password@host`` credentials embedded in ``text``.
+
+    Used on log lines, so a driver error that echoes the connection string does
+    not write the database password into the logs.
+    """
+    return re.sub(r"(?i)([a-z][a-z0-9+.-]*://[^:/@\s]+:)[^@/\s]+(@)", r"\1***\2", str(text))
+
+
+def classify_storage_error(error: Exception) -> str:
+    """Map a database-open failure to a fixed, credential-free label.
+
+    A raw driver exception can embed the entire connection string — a malformed
+    ``DATABASE_URL`` produces e.g. ``missing "=" after
+    "postgresql://user:secret@host"`` — and the health endpoint that reports it is
+    unauthenticated. The full error is logged server-side by the caller; only one
+    of these stable labels is ever returned to a client.
+    """
+    text = f"{type(error).__name__}: {error}".lower()
+    if isinstance(error, (ValueError, KeyError)) or "dsn" in text or "connection info" in text or "missing \"=\"" in text:
+        return "invalid_connection_string"
+    if "password" in text or "authentication" in text or "role " in text or "28p01" in text:
+        return "authentication_failed"
+    if "resolve host" in text or "name or service not known" in text or "getaddrinfo" in text:
+        return "host_unresolvable"
+    if "connection refused" in text or "could not connect" in text or "server closed" in text:
+        return "connection_refused"
+    if "timeout" in text or "timed out" in text:
+        return "connection_timeout"
+    if "does not exist" in text or "undefined" in text:
+        return "schema_error"
+    return "unavailable"
 
 
 def _seller_is_party(job: Job, seller_id: str) -> bool:
@@ -41,6 +76,22 @@ IN_FLIGHT_STATUSES = frozenset(
         JobStatus.AWAITING_APPROVAL,
     }
 )
+
+# The subset of in-flight statuses from which an *expired* lease means the worker
+# died mid-run and the job may be safely reclaimed. ``AWAITING_APPROVAL`` is
+# deliberately excluded: it is a legitimate paused state, not a dead worker. The
+# job is waiting on the buyer (an out-of-band action), no worker holds it, and
+# re-running it would create a second PayPal order and possibly hold funds twice.
+# A pending approval is resumed through ``claim_approval``, never re-run.
+RECLAIMABLE_STATUSES = IN_FLIGHT_STATUSES - {JobStatus.AWAITING_APPROVAL}
+
+# A reclaim is additionally gated on the escrow holding no money yet
+# (``EscrowState.NONE``): a run may only be restarted before it has created a
+# PayPal order. Re-running a job whose funds are already held would be wrong — it
+# would either double-hold or, because ``settlement.hold`` refuses a held escrow,
+# fail and leave the job wedged mid-reclaim. A post-money crash (funds held,
+# delivery in flight) is recovered by settling or cancelling, never by re-running.
+RECLAIMABLE_ESCROW_STATES = frozenset({EscrowState.NONE})
 
 # Default execution lease. Long enough for a real negotiation plus a PayPal
 # round-trip, short enough that a crashed worker is recovered promptly.
@@ -166,24 +217,28 @@ class JobStore:
 
     # ------------------------------------------------- concurrency guards
 
-    def claim_run(self, job: Job, *, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> bool:
-        """Atomically move a job out of a runnable state. False means someone else won.
+    def claim_run(self, job: Job, *, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> Job | None:
+        """Atomically move a job out of a runnable state, returning the claimed job.
 
-        Reclaims a job whose execution lease has expired, so a worker that died
-        mid-run (a serverless timeout, a crash) does not wedge the job forever.
-        Mirrors the Postgres store; in-process this is enough because one instance
-        owns the whole dict.
+        ``None`` means another worker won (or the job is not runnable). A job is
+        claimable when it is runnable (``OPEN``/``FAILED``) or when it is in a
+        reclaimable in-flight state whose execution lease has expired, so a worker
+        that died mid-run (a serverless timeout, a crash) does not wedge the job
+        forever. A job whose lease is still live is never reclaimed, so two live
+        workers cannot both run the same job. Mirrors the Postgres store.
         """
         with self._lock:
             current = self._jobs.get(job.id)
             if current is None or current.is_deleted:
-                return False
+                return None
             runnable = current.status in {JobStatus.OPEN, JobStatus.FAILED}
             recoverable = (
-                current.status in IN_FLIGHT_STATUSES and not current.lease_is_live()
+                current.status in RECLAIMABLE_STATUSES
+                and current.escrow.state in RECLAIMABLE_ESCROW_STATES
+                and not current.lease_is_live()
             )
             if not (runnable or recoverable):
-                return False
+                return None
             if recoverable:
                 current.append(
                     "run_recovered",
@@ -194,9 +249,9 @@ class JobStore:
             current.status = JobStatus.NEGOTIATING
             current.run_lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
             self.save(current)
-            return True
+            return current
 
-    def claim_approval(self, job: Job) -> bool:
+    def claim_approval(self, job: Job, *, ttl_seconds: int | None = None) -> bool:
         """Atomically claim the buyer-approval transition. False means someone else won.
 
         This is the transition that authorizes the buyer's funds, so it must be
@@ -205,15 +260,26 @@ class JobStore:
         is keyed off the *escrow* state, not the job status: a first attempt that
         PayPal rejected before approval leaves the job FAILED but the order still
         awaiting approval, and that attempt must remain retryable.
+
+        A claim older than ``ttl_seconds`` is treated as abandoned (the worker that
+        took it died mid-flight), so the buyer is not permanently locked out of
+        approving their own order.
         """
+        ttl = settings.approval_claim_ttl_seconds if ttl_seconds is None else ttl_seconds
         with self._lock:
             current = self._jobs.get(job.id)
             if current is None or current.is_deleted:
                 return False
             if current.escrow.state is not EscrowState.AWAITING_APPROVAL:
                 return False
-            if current.approval_claimed_at is not None:
+            if current.approval_claim_is_live(ttl):
                 return False
+            if current.approval_claimed_at is not None:
+                current.append(
+                    "approval_claim_recovered",
+                    "pact",
+                    "Reclaimed an abandoned buyer-approval claim",
+                )
             current.approval_claimed_at = datetime.now(timezone.utc)
             current.append(
                 "approval_claimed",
@@ -372,9 +438,10 @@ class UnavailableStore:
     Refusing to serve is safer than silently falling back to instance-local files:
     on a serverless host that fallback would look healthy while losing the ledger
     on every cold start, and could settle real money against state no other
-    instance can see. Every operation raises, so no settlement can proceed, and
-    ``error`` is reported through ``/api/health`` so the cause is visible instead
-    of appearing as an unexplained 500 on every route.
+    instance can see. Every operation raises, so no settlement can proceed, and a
+    *credential-free* classification of the failure is reported through
+    ``/api/health`` so the cause is visible instead of appearing as an unexplained
+    500 on every route.
     """
 
     backend = "unavailable"
@@ -383,10 +450,16 @@ class UnavailableStore:
 
     def __init__(self, error: Exception) -> None:
         self.error = error
+        # Only this sanitized classification is ever exposed to a client. A raw
+        # driver error can echo the whole connection string, including the
+        # password (e.g. a malformed DSN: 'missing "=" after
+        # "postgresql://user:secret@host"'), and /api/health is unauthenticated.
+        self.error_classification = classify_storage_error(error)
 
     def _fail(self, *_, **__):
         raise RuntimeError(
-            f"Durable storage is unavailable, so settlement is disabled: {self.error}"
+            f"Durable storage is unavailable, so settlement is disabled "
+            f"({self.error_classification})"
         )
 
     save = get = get_including_deleted = list = delete = claim_run = _fail
@@ -413,7 +486,7 @@ def _select_backend():
             "DATABASE_URL is set but the Postgres backend could not be opened (%s). "
             "Settlement is disabled until the database is reachable; the app will NOT "
             "fall back to non-durable local storage.",
-            exc,
+            redact_credentials(exc),
         )
         return UnavailableStore(exc), ReputationLedger()
 

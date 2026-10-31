@@ -132,6 +132,14 @@ class Settings:
     run_queue_timeout_seconds: float = field(
         default_factory=lambda: float(os.getenv("PACT_RUN_QUEUE_TIMEOUT_SECONDS", "2.0"))
     )
+    # How long a claimed buyer approval stays claimed before another worker may
+    # retry it. The claim exists only to stop two approvals racing; it must not
+    # outlive the attempt, or a worker that dies between claiming and returning
+    # would block the buyer from ever approving the order. The window is
+    # comfortably longer than a PayPal round-trip (see the PayPal client timeout).
+    approval_claim_ttl_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_APPROVAL_CLAIM_TTL_SECONDS", "120"))
+    )
 
     @property
     def is_production(self) -> bool:

@@ -143,10 +143,13 @@ def health() -> dict[str, Any]:
         "backend": getattr(store, "backend", "unknown"),
         "durable": bool(getattr(store, "durable", False)),
     }
-    # When the configured durable backend could not be opened, say why here rather
-    # than letting every route fail with an unexplained 500.
+    # When the configured durable backend could not be opened, say so here rather
+    # than letting every route fail with an unexplained 500. Only a fixed,
+    # credential-free classification is returned: this endpoint is unauthenticated,
+    # and a raw driver error can echo the connection string (including the
+    # password). The full error stays in the server log.
     if getattr(store, "backend", "") == "unavailable":
-        storage["error"] = str(getattr(store, "error", "unavailable"))
+        storage["error"] = getattr(store, "error_classification", "unavailable")
         storage["settlement_disabled"] = True
 
     settlement_real = engine.settlement_mode not in {"mock", ""}

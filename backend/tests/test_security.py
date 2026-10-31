@@ -11,6 +11,8 @@ without external services.
 
 from __future__ import annotations
 
+import dataclasses
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -559,3 +561,174 @@ def test_runtime_validation_rejects_a_relative_public_url():
         public_url="pact.example",
     )
     assert any("PACT_PUBLIC_URL" in p for p in bad.validate_runtime())
+
+
+# ------------------------------------------------- health must not leak secrets
+
+
+def test_health_never_leaks_the_database_password(client, monkeypatch):
+    """A malformed DATABASE_URL must not echo its credentials through /api/health.
+
+    The endpoint is unauthenticated, so anything it returns is public. A raw
+    driver error embeds the whole connection string, password included.
+    """
+    from pact.api import routes
+    from pact.core import store as store_module
+
+    fake_dsn = "not-a-valid-dsn://pact_user:SUPERSECRETPW@db.internal:5432/pact"
+    monkeypatch.setattr(
+        store_module, "settings",
+        dataclasses.replace(store_module.settings, database_url=fake_dsn),
+    )
+    unavailable, _ = store_module._select_backend()
+    assert unavailable.backend == "unavailable"
+    # The stand-in carries the raw error for the server log...
+    assert "SUPERSECRETPW" in str(unavailable.error)
+    # ...but only a fixed classification is exposed.
+    assert unavailable.error_classification == "invalid_connection_string"
+
+    monkeypatch.setattr(routes.engine, "store", unavailable)
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    body = response.text
+    assert "SUPERSECRETPW" not in body
+    assert "not-a-valid-dsn" not in body
+    assert response.json()["storage"]["error"] == "invalid_connection_string"
+
+
+def test_health_reports_unavailable_storage_as_degraded(client, monkeypatch):
+    from pact.api import routes
+    from pact.core import store as store_module
+
+    monkeypatch.setattr(
+        store_module, "settings",
+        dataclasses.replace(store_module.settings, database_url="postgresql://u:SUPERSECRETPW@127.0.0.1:1/x"),
+    )
+    unavailable, _ = store_module._select_backend()
+    monkeypatch.setattr(routes.engine, "store", unavailable)
+    payload = client.get("/api/health").json()
+    assert payload["status"] == "degraded"
+    assert payload["storage"]["settlement_disabled"] is True
+    assert "SUPERSECRETPW" not in str(payload)
+
+
+def test_a_driver_error_cannot_reach_a_client_even_if_raw():
+    """Defence in depth: the classification is derived, never the raw string."""
+    from pact.core.store import classify_storage_error, redact_credentials
+
+    exc = ValueError('missing "=" after "postgresql://u:SUPERSECRETPW@h" in connection info string')
+    assert classify_storage_error(exc) == "invalid_connection_string"
+    assert "SUPERSECRETPW" not in redact_credentials(str(exc))
+    assert redact_credentials("postgresql://u:SUPERSECRETPW@h/db") == "postgresql://u:***@h/db"
+
+
+# ------------------------------------------------ SSE stream auth must fail closed
+
+
+def test_stream_ticket_fails_closed_when_no_secret_is_configured(client, monkeypatch):
+    """An unconfigured secret must be a 503, never an uncaught 500."""
+    import jwt as pyjwt
+
+    from pact.api import auth as auth_module
+
+    job_id = _create(client)
+    forged = pyjwt.encode(
+        {"sub": "buyer", "role": "buyer", "scope": f"stream:{job_id}", "jti": "x",
+         "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp())},
+        "attacker-key-attacker-key-attacker-key",
+        algorithm="HS256",
+    )
+    _unset_auth_secret(monkeypatch, auth_module)
+    response = client.get(f"/api/jobs/{job_id}/stream?ticket={forged}")
+    assert response.status_code == 503, response.text
+    assert "Traceback" not in response.text
+
+
+def test_stream_ticket_with_a_forged_signature_is_401(client):
+    """A ticket signed with the wrong key is an auth failure, not a crash."""
+    import jwt as pyjwt
+
+    job_id = _create(client)
+    forged = pyjwt.encode(
+        {"sub": "buyer", "role": "buyer", "scope": f"stream:{job_id}", "jti": "y",
+         "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp())},
+        "attacker-key-attacker-key-attacker-key",
+        algorithm="HS256",
+    )
+    response = client.get(f"/api/jobs/{job_id}/stream?ticket={forged}")
+    assert response.status_code == 401, response.text
+
+
+def _unset_auth_secret(monkeypatch, auth_module) -> None:
+    """Point the auth module at settings with an empty secret (frozen dataclass)."""
+    patched = dataclasses.replace(
+        auth_module.settings,
+        auth=dataclasses.replace(auth_module.settings.auth, secret=""),
+    )
+    monkeypatch.setattr(auth_module, "settings", patched)
+
+
+def test_an_invalid_key_is_a_503_not_a_traceback(monkeypatch):
+    """Directly exercise the decoder: an unusable key fails closed."""
+    import jwt as pyjwt
+    from fastapi import HTTPException
+
+    from pact.api import auth as auth_module
+
+    token = pyjwt.encode(
+        {"sub": "buyer", "role": "buyer", "scope": "stream:job_x", "jti": "z",
+         "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp())},
+        "attacker-key-attacker-key-attacker-key",
+        algorithm="HS256",
+    )
+    _unset_auth_secret(monkeypatch, auth_module)
+    with pytest.raises(HTTPException) as excinfo:
+        auth_module._decode(token)
+    assert excinfo.value.status_code == 503
+
+
+# ------------------------------------------------------- SSE ticket is single-use
+
+
+def test_a_stream_ticket_is_single_use(client):
+    """The docstring says single-use; a replay must be refused."""
+    from pact.api import auth as auth_module
+
+    auth_module._consumed_tickets.clear()
+    job_id = _create(client)
+    ticket = client.post(f"/api/jobs/{job_id}/stream-ticket", headers=BUYER).json()["ticket"]
+    first = client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}")
+    assert first.status_code == 200
+    second = client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}")
+    assert second.status_code == 401, "a consumed ticket must not be replayable"
+
+
+def test_the_consumption_registry_is_atomic():
+    from pact.api import auth as auth_module
+
+    auth_module._consumed_tickets.clear()
+    results: list[bool] = []
+    barrier = threading.Barrier(8)
+
+    def consume() -> None:
+        barrier.wait(timeout=5)
+        results.append(auth_module._consume_ticket("one-shot", 60))
+
+    threads = [threading.Thread(target=consume) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count(True) == 1
+
+
+def test_the_consumed_ticket_registry_stays_bounded():
+    """A consumed id must be pruned once its window closes, or the map leaks."""
+    from pact.api import auth as auth_module
+
+    auth_module._consumed_tickets.clear()
+    assert auth_module._consume_ticket("already-closed", 0) is True
+    # The next call prunes the entry whose window has already elapsed.
+    assert auth_module._consume_ticket("still-open", 60) is True
+    assert "already-closed" not in auth_module._consumed_tickets
+    assert "still-open" in auth_module._consumed_tickets

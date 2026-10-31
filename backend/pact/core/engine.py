@@ -181,18 +181,30 @@ class PactEngine:
         twice, so two simultaneous settlement requests cannot produce a duplicate
         capture or contradictory terminal states.
         """
-        if job.status not in {JobStatus.OPEN, JobStatus.FAILED}:
+        # The atomic claim is the *only* decision about whether this run may
+        # proceed — there is deliberately no status pre-check in front of it. A
+        # pre-check reads this process's copy and cannot see another worker's
+        # claim, and (worse) it rejected the very in-flight states a crashed
+        # worker leaves behind, so an expired lease could never be reclaimed
+        # through the engine at all. ``claim_run`` allows a job that is runnable
+        # or whose lease has expired, and refuses one whose lease is still live,
+        # so two live workers cannot both proceed and a hard-killed worker does
+        # not brick the job. It returns the freshly claimed record (None if
+        # another worker won) so we operate on authoritative state.
+        claimed = self.store.claim_run(job, lease_seconds=settings.lease_seconds)
+        if claimed is None:
             raise JobAlreadyRunning(
-                f"Job {job.id} is {job.status.value}; refusing to run it again"
+                f"Job {job.id} is already being run (or its lease is still live); "
+                f"refusing to run it again"
             )
-
-        # Claim the job atomically. The check above reads this process's copy; the
-        # claim is what actually decides the transition, so two instances that both
-        # read "open" cannot both proceed.
-        if not self.store.claim_run(job, lease_seconds=settings.lease_seconds):
-            raise JobAlreadyRunning(
-                f"Job {job.id} was claimed by another run; refusing to run it again"
-            )
+        # Adopt the authoritative state into the caller's object rather than
+        # rebinding, so a run keeps mutating the handle the caller passed in — the
+        # contract every other transition relies on. On Postgres the claim returns
+        # a freshly loaded row, which is a different object.
+        if claimed is not job:
+            job.__dict__.update(claimed.__dict__)
+        if job.is_deleted:
+            raise JobAlreadyRunning(f"Job {job.id} has been deleted; refusing to run it")
 
         seller_ids = seller_ids or default_seller_ids()
         job.status = JobStatus.NEGOTIATING

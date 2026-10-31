@@ -23,6 +23,9 @@ Credentials are minted with ``scripts/issue_token.py``. See ``docs/AUTH.md``.
 from __future__ import annotations
 
 import logging
+import threading
+import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
@@ -55,6 +58,36 @@ def stream_scope(job_id: str) -> str:
     return f"stream:{job_id}"
 
 
+# Consumed stream-ticket ids, so a ticket is single-use. A ticket travels in a URL
+# (server logs, browser history, a shared link), and the frontend reconnects if a
+# stream drops — without this, a captured URL could be replayed for the ticket's
+# whole lifetime. Entries expire shortly after the ticket itself would, so the map
+# stays bounded. This is best-effort across processes: on a multi-instance host a
+# replay could still land on a different instance, which is why the ticket is also
+# short-lived and single-job-scoped.
+_consumed_tickets: dict[str, float] = {}
+_consumed_guard = threading.Lock()
+
+
+def _consume_ticket(ticket_id: str, ttl_seconds: float) -> bool:
+    """Record a ticket id as used for ``ttl_seconds``. False if already consumed.
+
+    Atomic under a lock, so two concurrent connections cannot both consume the
+    same ticket. The expiry is stored on the *monotonic* clock (the same clock it
+    is pruned against), so the map stays bounded; mixing in a wall-clock value
+    would mean the prune never fires and the map would grow without limit.
+    Expired ids are pruned opportunistically on each call.
+    """
+    now = time.monotonic()
+    with _consumed_guard:
+        for key in [k for k, exp in _consumed_tickets.items() if exp <= now]:
+            del _consumed_tickets[key]
+        if ticket_id in _consumed_tickets:
+            return False
+        _consumed_tickets[ticket_id] = now + max(0.0, ttl_seconds)
+        return True
+
+
 @dataclass(frozen=True)
 class Principal:
     """The authenticated caller, derived only from a verified token."""
@@ -64,6 +97,9 @@ class Principal:
     # Set only on a capability-scoped token (a stream ticket). Ordinary tokens
     # carry no scope and are refused where a scope is required, and vice versa.
     scope: str | None = None
+    # The unique id of a stream ticket, used to consume it exactly once. ``None``
+    # for an ordinary token.
+    ticket_id: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -156,6 +192,14 @@ def _decode(token: str) -> dict[str, Any]:
         raise
     except jwt.ExpiredSignatureError as exc:
         raise _unauthorized("Token has expired") from exc
+    except jwt.InvalidKeyError as exc:
+        # An unusable signing key (e.g. an empty secret). This is a server
+        # misconfiguration, not a bad credential, and it must fail closed rather
+        # than surface as an uncaught 500 with a traceback.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is not configured correctly on this server.",
+        ) from exc
     except jwt.InvalidTokenError as exc:
         # Covers a bad signature, a malformed token, and an unexpected algorithm.
         raise _unauthorized("Invalid authentication token") from exc
@@ -169,7 +213,13 @@ def _principal_from_claims(claims: dict[str, Any]) -> Principal:
     if role not in VALID_ROLES:
         raise _unauthorized("Token carries an unknown role")
     scope = claims.get("scope")
-    return Principal(subject=subject, role=role, scope=scope if isinstance(scope, str) else None)
+    jti = claims.get("jti")
+    return Principal(
+        subject=subject,
+        role=role,
+        scope=scope if isinstance(scope, str) else None,
+        ticket_id=jti if isinstance(jti, str) else None,
+    )
 
 
 def _assert_not_scoped(principal: Principal) -> None:
@@ -278,6 +328,7 @@ def issue_stream_ticket(principal: Principal, job_id: str) -> str:
         "sub": principal.subject,
         "role": principal.role,
         "scope": stream_scope(job_id),
+        "jti": uuid.uuid4().hex,
         "iat": int(issued.timestamp()),
         "exp": int((issued + STREAM_TICKET_TTL).timestamp()),
     }
@@ -306,10 +357,28 @@ def require_stream_principal(
         return principal_from_token(value)
     if not ticket:
         raise _unauthorized("Missing Authorization header or stream ticket")
+    # Fail closed before decoding, exactly like the header paths. Without this an
+    # unconfigured deployment would reach the verifier with an empty key.
+    if not settings.auth.configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Authentication is not configured on this server. Set "
+                "PACT_AUTH_SECRET before serving requests."
+            ),
+        )
     claims = _decode(ticket.strip())
     principal = _principal_from_claims(claims)
     if principal.scope != stream_scope(job_id):
         raise _forbidden("Stream ticket is not valid for this job")
+    # Single-use: a ticket travels in a URL, so a captured one must not be
+    # replayable for its whole lifetime. Consume it atomically; a replay is
+    # refused. It is retained for the ticket's remaining life so the entry cannot
+    # outlive the token it guards.
+    if principal.ticket_id is None or not _consume_ticket(
+        principal.ticket_id, float(claims.get("exp", 0)) - time.time()
+    ):
+        raise _unauthorized("Stream ticket has already been used")
     return principal
 
 
