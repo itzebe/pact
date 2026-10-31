@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (Python ${{ env.PYTHON_VERSION }} + PostgreSQL 16)
+    name: Backend (Python 3.11 + PostgreSQL 16)
     runs-on: ubuntu-24.04
     # Postgres 16 is the version the tests are written against. The service
     # container is the only database the suite may use, and DATABASE_URL points at
@@ -96,7 +96,7 @@ jobs:
         run: python -m pyflakes pact/ scripts/
 
   frontend:
-    name: Frontend (Node ${{ env.NODE_VERSION }})
+    name: Frontend (Node 20)
     runs-on: ubuntu-24.04
     env:
       NODE_VERSION: "20"
