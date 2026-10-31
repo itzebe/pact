@@ -68,7 +68,13 @@ class NegotiationEngine:
             f"CONTEXT:{json.dumps(context)}\n\nProduce your quote as a JSON object.",
             seller_id,
         )
-        price = _positive_decimal(raw.get("price"), default=job.budget_max)
+        # A seller that cannot produce a usable positive price is dropped from the
+        # round rather than silently priced at the buyer's ceiling. Falling back to
+        # ``budget_max`` would let a malformed model response charge the buyer the
+        # maximum they said they would pay, which is the opposite of a guardrail.
+        price = _parse_price(raw.get("price"))
+        if price is None:
+            raise LLMError(f"{seller_id} returned no usable price ({raw.get('price')!r})")
         return Offer(
             seller_id=seller_id,
             price=price,
@@ -103,7 +109,11 @@ class NegotiationEngine:
             job.buyer_id,
         )
 
-        counter = _positive_decimal(raw.get("price"), default=min(offer.price, job.budget_max))
+        counter = _parse_price(raw.get("price"))
+        if counter is None:
+            # The buyer's own counter is not a seller price, so defaulting it to the
+            # seller's ask (clamped to budget) is safe — it never exceeds the ceiling.
+            counter = min(offer.price, job.budget_max)
         accept = as_bool(raw.get("accept", False))
 
         if counter > job.budget_max:
@@ -291,14 +301,26 @@ class NegotiationEngine:
         return raw
 
 
-def _positive_decimal(value, default: Decimal) -> Decimal:
+def _parse_price(value) -> Decimal | None:
+    """Parse a model-supplied price, or return None if it is unusable.
+
+    Returns None for anything that is not a finite, strictly positive number with
+    at most two decimal places. Callers must decide what an unusable price means;
+    they must never substitute the buyer's ceiling for a seller's price.
+    """
     try:
         parsed = Decimal(str(value))
-        if parsed <= 0:
-            return Decimal(str(default))
-        return parsed
     except Exception:
-        return Decimal(str(default))
+        return None
+    if not parsed.is_finite() or parsed <= 0:
+        return None
+    # Reject absurd magnitudes rather than passing them to PayPal.
+    if parsed > Decimal("100000000"):
+        return None
+    try:
+        return parsed.quantize(Decimal("0.01"))
+    except Exception:
+        return None
 
 
 def _clamp(value, low: float, high: float, default: float) -> float:

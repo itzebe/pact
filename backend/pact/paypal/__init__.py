@@ -58,9 +58,14 @@ class EscrowBackend(Protocol):
 def build_escrow_client() -> EscrowBackend:
     """Return a live client when credentials exist, else a clearly-marked mock.
 
-    ``PACT_REQUIRE_REAL_PAYPAL`` makes the absence of credentials a hard startup
-    failure. Without it, a production deployment could silently settle against the
-    in-memory double and report a "settled" job for which no money ever moved.
+    Three gates protect against a deployment that fakes a settlement:
+
+    1. ``PACT_REQUIRE_REAL_PAYPAL`` makes missing credentials a hard failure.
+    2. In production (any ``PACT_ENV`` other than development/test) the mock is
+       refused outright, regardless of ``PACT_ALLOW_MOCK_PAYPAL``. A production
+       process that cannot reach PayPal must fail, not silently move fake money.
+    3. Otherwise the mock is used only when explicitly allowed, and the resulting
+       client is labelled so no caller can report its output as real.
     """
     if settings.paypal.configured:
         log.info("PayPal escrow client using %s credentials", settings.paypal.environment)
@@ -70,6 +75,15 @@ def build_escrow_client() -> EscrowBackend:
             "PACT_REQUIRE_REAL_PAYPAL is set but no PayPal credentials were found. "
             "Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET, or unset "
             "PACT_REQUIRE_REAL_PAYPAL to allow simulated settlement."
+        )
+    if settings.is_production:
+        # Never fake a settlement in production. This is not configurable: a
+        # production process either has real credentials or it does not settle.
+        raise PayPalError(
+            "Refusing to start: no PayPal credentials, and this process is running in "
+            f"production (PACT_ENV={settings.environment}). A mock settlement moves no "
+            "money, so it must never be reported as a real one. Set PAYPAL_CLIENT_ID "
+            "and PAYPAL_CLIENT_SECRET, or set PACT_ENV=development to allow the mock."
         )
     if settings.allow_mock_paypal:
         log.warning(

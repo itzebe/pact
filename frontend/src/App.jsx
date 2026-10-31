@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, money, streamJob } from './lib/api'
+import { api, getToken, money, setToken, streamJob } from './lib/api'
 import { displayStatus } from './lib/status'
 import {
   Empty,
@@ -33,6 +33,7 @@ export default function App() {
   const [notice, setNotice] = useState(null)
   const [live, setLive] = useState(false)
   const [liveEntries, setLiveEntries] = useState([])
+  const [token, setTokenState] = useState(() => getToken())
   const unsubRef = useRef(null)
 
   const refreshLists = useCallback(async () => {
@@ -46,6 +47,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!token) return
     ;(async () => {
       try {
         setHealth(await api.health())
@@ -54,7 +56,13 @@ export default function App() {
         setError(e.message)
       }
     })()
-  }, [refreshLists])
+  }, [refreshLists, token])
+
+  const connect = useCallback((value) => {
+    setToken(value)
+    setTokenState(value)
+    setError(null)
+  }, [])
 
   // Tear the stream down on unmount so a closed tab cannot leak a connection.
   useEffect(() => () => unsubRef.current?.(), [])
@@ -176,9 +184,34 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-ink-950 grain">
-      <Header health={health} live={live} />
+      <Header health={health} live={live} onDisconnect={token ? () => connect('') : null} />
 
       <main className="mx-auto max-w-[1500px] px-5 py-6">
+        {!token ? (
+          <Connect onConnect={connect} />
+        ) : (
+          <>
+        {error && (
+          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-voided/40 bg-voided-dim/40 px-4 py-3">
+            <div>
+              <div className="text-sm font-medium text-voided">Something went wrong</div>
+              <div className="mt-0.5 text-xs text-paper-dim">{error}</div>
+            </div>
+            <button className="text-2xs text-paper-faint hover:text-paper" onClick={() => setError(null)}>
+              dismiss
+            </button>
+          </div>
+        )}
+
+        {health?.paypal?.settlement_is_real === false && (
+          <div className="mb-5 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
+            <div className="text-sm font-medium text-held">Simulated settlement</div>
+            <div className="mt-0.5 text-xs text-paper-dim">
+              This deployment is running against the in-memory PayPal double. No money moves and no
+              payment is real. Set PayPal credentials for a live escrow.
+            </div>
+          </div>
+        )}
         {job?.escrow?.state === 'awaiting_approval' && (
           <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
             <div>
@@ -231,18 +264,6 @@ export default function App() {
           <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
             <div className="text-xs text-paper-dim">{notice}</div>
             <button className="text-2xs text-paper-faint hover:text-paper" onClick={() => setNotice(null)}>
-              dismiss
-            </button>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-voided/40 bg-voided-dim/40 px-4 py-3">
-            <div>
-              <div className="text-sm font-medium text-voided">Something went wrong</div>
-              <div className="mt-0.5 text-xs text-paper-dim">{error}</div>
-            </div>
-            <button className="text-2xs text-paper-faint hover:text-paper" onClick={() => setError(null)}>
               dismiss
             </button>
           </div>
@@ -320,6 +341,8 @@ export default function App() {
             <HowItWorks />
           </aside>
         </div>
+          </>
+        )}
       </main>
 
       <footer className="mx-auto max-w-[1500px] px-5 pb-10 pt-2">
@@ -334,7 +357,52 @@ export default function App() {
   )
 }
 
-function Header({ health, live }) {
+function Connect({ onConnect }) {
+  const [value, setValue] = useState('')
+  return (
+    <div className="panel mx-auto mt-16 max-w-lg px-6 py-8">
+      <div className="label">Access token required</div>
+      <h1 className="mt-2 text-base font-semibold tracking-tight text-paper">
+        Connect to this Pact deployment
+      </h1>
+      <p className="mt-2 text-xs leading-relaxed text-paper-dim">
+        Every endpoint requires a signed bearer token, so a public link cannot be used to read or
+        move another party's money. Paste a token to continue. Tokens are minted by the operator;
+        see the README for the command.
+      </p>
+      <form
+        className="mt-5 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const trimmed = value.trim()
+          if (trimmed) onConnect(trimmed)
+        }}
+      >
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="eyJhbGciOi…"
+          autoComplete="off"
+          className="min-w-0 flex-1 rounded-lg border border-ink-600 bg-ink-900 px-3 py-2 text-xs text-paper placeholder:text-paper-faint focus:border-paypal/50 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={!value.trim()}
+          className="chip ring-1 bg-paypal-deep/50 text-paypal-bright ring-paypal/40 disabled:opacity-50"
+        >
+          Connect
+        </button>
+      </form>
+      <p className="mt-3 text-2xs leading-relaxed text-paper-faint">
+        The token is kept in this browser only and sent as an <code>Authorization</code> header. It
+        is not stored on the server.
+      </p>
+    </div>
+  )
+}
+
+function Header({ health, live, onDisconnect }) {
   const paypalMode = health?.paypal?.mode
   const llmMock = health?.llm?.is_mock
   return (
@@ -363,6 +431,15 @@ function Header({ health, live }) {
             </span>
           )}
           {paypalMode && <ModeBadge mode={paypalMode} />}
+          {onDisconnect && (
+            <button
+              onClick={onDisconnect}
+              className="chip bg-ink-800 text-paper-faint ring-1 ring-ink-600 hover:text-paper"
+              title="Forget the token stored in this browser"
+            >
+              Disconnect
+            </button>
+          )}
           {live && (
             <span className="chip bg-released-dim text-released ring-1 ring-released/40">
               <span className="live-dot h-1.5 w-1.5 rounded-full bg-current" />

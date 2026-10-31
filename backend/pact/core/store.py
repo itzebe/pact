@@ -12,14 +12,45 @@ import logging
 import tempfile
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
 from ..config import settings
-from .models import Job, JobStatus
+from .models import EscrowState, Job, JobStatus
 
 log = logging.getLogger("pact.store")
+
+
+def _seller_is_party(job: Job, seller_id: str) -> bool:
+    """True when ``seller_id`` won the job or was invited to it (has an offer)."""
+    if job.seller_id == seller_id:
+        return True
+    return any(getattr(o, "seller_id", None) == seller_id for o in job.offers)
+
+
+# Statuses that mean a worker is (or was) mid-run. A job in one of these can be
+# reclaimed only once its execution lease has expired.
+IN_FLIGHT_STATUSES = frozenset(
+    {
+        JobStatus.NEGOTIATING,
+        JobStatus.AGREED,
+        JobStatus.ESCROWED,
+        JobStatus.DELIVERED,
+        JobStatus.VERIFYING,
+        JobStatus.AWAITING_APPROVAL,
+    }
+)
+
+# Default execution lease. Long enough for a real negotiation plus a PayPal
+# round-trip, short enough that a crashed worker is recovered promptly.
+DEFAULT_LEASE_SECONDS = 300
+
+# Escrow states from which nothing further can move money. Only these may be
+# deleted; anything else might still hold the buyer's funds.
+TERMINAL_ESCROW_STATES = frozenset(
+    {EscrowState.NONE, EscrowState.VOIDED, EscrowState.REFUNDED}
+)
 
 
 def _writable_dir(preferred: Path) -> Path:
@@ -84,34 +115,111 @@ class JobStore:
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
+            job = self._jobs.get(job_id)
+            # A tombstoned job is gone as far as callers are concerned, but its
+            # record is retained on disk for audit and reconciliation.
+            return None if (job is not None and job.is_deleted) else job
+
+    def get_including_deleted(self, job_id: str) -> Job | None:
+        with self._lock:
             return self._jobs.get(job_id)
 
-    def list(self, limit: int = 50) -> list[Job]:
+    def list(
+        self,
+        limit: int = 50,
+        *,
+        buyer_id: str | None = None,
+        seller_id: str | None = None,
+    ) -> list[Job]:
+        """Newest jobs first, filtered server-side.
+
+        ``seller_id`` matches a job the seller won or was invited to (they have an
+        offer). The filter runs *before* the limit is applied: filtering a
+        globally-truncated page would silently drop a seller's older jobs once
+        there are more jobs than the limit.
+        """
         with self._lock:
-            jobs = sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+            jobs = [
+                j for j in self._jobs.values()
+                if not j.is_deleted
+                and (buyer_id is None or j.buyer_id == buyer_id)
+                and (seller_id is None or _seller_is_party(j, seller_id))
+            ]
+            jobs.sort(key=lambda j: j.created_at, reverse=True)
             return jobs[:limit]
 
     def delete(self, job_id: str) -> bool:
+        """Tombstone a job. The record is retained, never removed from disk.
+
+        Returns False if the job does not exist (or was already deleted). The
+        caller is responsible for refusing the delete when escrow is not
+        terminal; this method only records the tombstone.
+        """
         with self._lock:
-            removed = self._jobs.pop(job_id, None)
-            path = self._path(job_id)
-            if path.exists():
-                path.unlink()
-            return removed is not None
+            job = self._jobs.get(job_id)
+            if job is None or job.is_deleted:
+                return False
+            job.deleted_at = datetime.now(timezone.utc)
+            job.append("job_deleted", "pact", "Job tombstoned; financial record retained")
+            self.save(job)
+            return True
 
     # ------------------------------------------------- concurrency guards
 
-    def claim_run(self, job: Job) -> bool:
+    def claim_run(self, job: Job, *, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> bool:
         """Atomically move a job out of a runnable state. False means someone else won.
 
-        Mirrors the Postgres store. In-process this is enough because one instance
-        owns the whole dict; the DB store needs the equivalent SQL-level guard.
+        Reclaims a job whose execution lease has expired, so a worker that died
+        mid-run (a serverless timeout, a crash) does not wedge the job forever.
+        Mirrors the Postgres store; in-process this is enough because one instance
+        owns the whole dict.
         """
         with self._lock:
             current = self._jobs.get(job.id)
-            if current is None or current.status not in {JobStatus.OPEN, JobStatus.FAILED}:
+            if current is None or current.is_deleted:
                 return False
+            runnable = current.status in {JobStatus.OPEN, JobStatus.FAILED}
+            recoverable = (
+                current.status in IN_FLIGHT_STATUSES and not current.lease_is_live()
+            )
+            if not (runnable or recoverable):
+                return False
+            if recoverable:
+                current.append(
+                    "run_recovered",
+                    "pact",
+                    "Reclaimed a run whose lease expired; the previous worker did not finish",
+                    previous_status=current.status.value,
+                )
             current.status = JobStatus.NEGOTIATING
+            current.run_lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+            self.save(current)
+            return True
+
+    def claim_approval(self, job: Job) -> bool:
+        """Atomically claim the buyer-approval transition. False means someone else won.
+
+        This is the transition that authorizes the buyer's funds, so it must be
+        decided in one place. Two concurrent approvals would otherwise both read
+        ``awaiting_approval`` and both proceed to authorize and settle. The claim
+        is keyed off the *escrow* state, not the job status: a first attempt that
+        PayPal rejected before approval leaves the job FAILED but the order still
+        awaiting approval, and that attempt must remain retryable.
+        """
+        with self._lock:
+            current = self._jobs.get(job.id)
+            if current is None or current.is_deleted:
+                return False
+            if current.escrow.state is not EscrowState.AWAITING_APPROVAL:
+                return False
+            if current.approval_claimed_at is not None:
+                return False
+            current.approval_claimed_at = datetime.now(timezone.utc)
+            current.append(
+                "approval_claimed",
+                "pact",
+                "Buyer approval claimed; continuing to authorization",
+            )
             self.save(current)
             return True
 
@@ -123,7 +231,8 @@ class JobStore:
         caller works from current state rather than a stale object.
         """
         with self._lock:
-            yield self._jobs.get(job.id)
+            fresh = self._jobs.get(job.id)
+            yield None if (fresh is not None and fresh.is_deleted) else fresh
 
 
 class ReputationLedger:
@@ -280,8 +389,8 @@ class UnavailableStore:
             f"Durable storage is unavailable, so settlement is disabled: {self.error}"
         )
 
-    save = get = list = delete = claim_run = _fail
-    settlement_claim = _fail
+    save = get = get_including_deleted = list = delete = claim_run = _fail
+    claim_approval = settlement_claim = _fail
 
 
 def _select_backend():
