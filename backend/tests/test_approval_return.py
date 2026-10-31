@@ -113,9 +113,29 @@ def test_configured_public_url_is_used_when_the_request_supplies_none(engine):
         object.__setattr__(settlement_module.settings, "public_url", original)
 
 
-def test_route_derives_the_public_base_from_forwarded_headers():
-    """Behind Vercel the real host is in X-Forwarded-*; the derived base must use it."""
+@pytest.fixture()
+def allowed_hosts(monkeypatch):
+    """Set the host allowlist for one test, restoring it afterwards.
+
+    ``Settings`` is a frozen dataclass, so a field cannot be rebound directly; the
+    value is replaced with ``object.__setattr__`` and put back in teardown.
+    """
+    from pact.config import settings as pact_settings
+
+    original = pact_settings.allowed_hosts
+
+    def _set(hosts: list[str]) -> None:
+        object.__setattr__(pact_settings, "allowed_hosts", hosts)
+
+    yield _set
+    object.__setattr__(pact_settings, "allowed_hosts", original)
+
+
+def test_route_derives_the_public_base_from_forwarded_headers(allowed_hosts):
+    """Behind Vercel the real host is in X-Forwarded-*; a *trusted* one is used."""
     from pact.api.routes import _public_base
+
+    allowed_hosts(["pact-flame.vercel.app"])
 
     class FakeUrl:
         scheme = "http"
@@ -127,8 +147,10 @@ def test_route_derives_the_public_base_from_forwarded_headers():
     assert _public_base(FakeRequest()) == "https://pact-flame.vercel.app"
 
 
-def test_route_falls_back_to_the_host_header_without_forwarded_proto():
+def test_route_falls_back_to_the_host_header_without_forwarded_proto(allowed_hosts):
     from pact.api.routes import _public_base
+
+    allowed_hosts(["pact.example"])
 
     class FakeUrl:
         scheme = "https"
@@ -138,6 +160,27 @@ def test_route_falls_back_to_the_host_header_without_forwarded_proto():
         url = FakeUrl()
 
     assert _public_base(FakeRequest()) == "https://pact.example"
+
+
+def test_route_refuses_an_untrusted_host(allowed_hosts):
+    """A forged Host must not become a PayPal return target.
+
+    Without this, an attacker could make the buyer's post-approval redirect point
+    at a domain they control. An unknown host yields no base URL, and PayPal is
+    asked for an order with no return_url rather than a hostile one.
+    """
+    from pact.api.routes import _public_base
+
+    allowed_hosts(["pact.example"])
+
+    class FakeUrl:
+        scheme = "https"
+
+    class FakeRequest:
+        headers = {"x-forwarded-host": "evil.example", "x-forwarded-proto": "https"}
+        url = FakeUrl()
+
+    assert _public_base(FakeRequest()) == ""
 
 
 # ----------------------------------------------------------------- idempotency key
@@ -281,21 +324,37 @@ def test_run_route_wires_the_deployments_own_host_into_the_order(tmp_path, monke
     )
     monkeypatch.setattr(routes, "engine", engine)
 
-    http = TestClient(app)
-    created = http.post(
-        "/api/jobs",
-        json={
-            "title": "Write the copy",
-            "brief": "Write the copy.",
-            "acceptance_criteria": ["Non-empty."],
-            "budget_max": 200,
-            "seller_ids": ["seller_nova"],
-        },
-    )
-    assert created.status_code == 201
-    job_id = created.json()["id"]
+    # The deployment's real host must be on the allowlist before it is trusted to
+    # become a PayPal return target; an untrusted host yields no return_url at all.
+    from pact.config import settings as pact_settings
 
-    run = http.post(f"/api/jobs/{job_id}/run", headers={"host": "pact-flame.vercel.app"})
+    original_hosts = pact_settings.allowed_hosts
+    object.__setattr__(pact_settings, "allowed_hosts", ["pact-flame.vercel.app"])
+    try:
+        from pact.api.auth import issue_token
+
+        http = TestClient(app)
+        auth = {"Authorization": f"Bearer {issue_token('buyer', 'buyer')}"}
+        created = http.post(
+            "/api/jobs",
+            json={
+                "title": "Write the copy",
+                "brief": "Write the copy.",
+                "acceptance_criteria": ["Non-empty."],
+                "budget_max": 200,
+                "seller_ids": ["seller_nova"],
+            },
+            headers=auth,
+        )
+        assert created.status_code == 201
+        job_id = created.json()["id"]
+
+        run = http.post(
+            f"/api/jobs/{job_id}/run",
+            headers={**auth, "host": "pact-flame.vercel.app"},
+        )
+    finally:
+        object.__setattr__(pact_settings, "allowed_hosts", original_hosts)
     assert run.status_code == 200, run.text
     assert run.json()["escrow"]["state"] == "awaiting_approval"
 

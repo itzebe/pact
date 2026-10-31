@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -96,6 +96,10 @@ class Verification(BaseModel):
 class EscrowRecord(BaseModel):
     provider: str = "paypal"
     mode: str = "sandbox"  # sandbox | live | mock
+    # True when this record came from the in-memory double rather than a real
+    # provider. Set at hold time and carried through settlement, so a simulated
+    # capture can never be reported as a real payment.
+    simulated: bool = False
     order_id: str = ""
     approval_url: str = ""
     authorization_id: str = ""
@@ -156,8 +160,48 @@ class Job(BaseModel):
     verification: Verification | None = None
     escrow: EscrowRecord = Field(default_factory=EscrowRecord)
     ledger: list[LedgerEntry] = Field(default_factory=list)
+    # A soft-delete tombstone. A deleted job is hidden from listings and returns
+    # 404, but its record is retained so a live PayPal authorization can never be
+    # silently discarded. ``deleted_at`` is set only once the escrow is terminal.
+    deleted_at: datetime | None = None
+    # Execution lease. A run claims the job for a bounded window; if the worker
+    # dies (timeout, crash) the lease expires and the job becomes claimable
+    # again, so an interrupted run can never wedge a job forever.
+    run_lease_expires_at: datetime | None = None
+    # Set exactly once when a buyer approval is claimed, so two concurrent
+    # approvals cannot both proceed to authorize the buyer's funds.
+    approval_claimed_at: datetime | None = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
+
+    def lease_is_live(self, at: datetime | None = None) -> bool:
+        if self.run_lease_expires_at is None:
+            return False
+        return (at or now()) < self.run_lease_expires_at
+
+    def approval_claim_is_live(self, ttl_seconds: int, at: datetime | None = None) -> bool:
+        """Whether a buyer-approval claim is still within its retry window.
+
+        A claim older than ``ttl_seconds`` is treated as abandoned (the worker
+        that took it died), so the buyer can approve the order again. ``None``
+        means no claim is outstanding.
+        """
+        if self.approval_claimed_at is None:
+            return False
+        return (at or now()) < self.approval_claimed_at + timedelta(seconds=ttl_seconds)
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
+
+    @property
+    def settlement_is_real(self) -> bool:
+        """True only when a real provider moved (or is holding) real money.
+
+        A mock capture must never be presented as a payment, so this is False
+        whenever the escrow record is flagged simulated.
+        """
+        return not self.escrow.simulated and self.escrow.mode not in {"mock", ""}
 
     # ------------------------------------------------------------- ledger
 

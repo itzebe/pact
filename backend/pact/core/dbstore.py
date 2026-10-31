@@ -16,12 +16,14 @@ same authorization.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from .models import Job
+from ..config import settings
 
 log = logging.getLogger("pact.dbstore")
 
@@ -35,14 +37,52 @@ CREATE TABLE IF NOT EXISTS jobs (
     escrow_capture_id  TEXT NOT NULL DEFAULT '',
     doc                JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS jobs_created_at_idx ON jobs (created_at DESC);
-CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status);
 
 CREATE TABLE IF NOT EXISTS reputation (
     agent_id TEXT PRIMARY KEY,
     doc      JSONB NOT NULL
 );
 """
+
+# Columns and indexes added after the first release. ``CREATE TABLE IF NOT EXISTS``
+# does not alter an existing table, so an already-deployed database needs these
+# explicitly. They run *before* any statement that references the new columns:
+# SCHEMA intentionally creates only the original columns, because a table-wide
+# index on a column that an older database does not yet have would fail at startup
+# before the migration that adds it could run. Each statement is idempotent, so
+# this is safe on every boot.
+MIGRATIONS = (
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS buyer_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS run_lease_expires_at TIMESTAMPTZ",
+    "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS approval_claimed_at TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS jobs_created_at_idx ON jobs (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status)",
+    "CREATE INDEX IF NOT EXISTS jobs_buyer_id_idx ON jobs (buyer_id)",
+    # Supports the seller filter in ``list``: a containment test over the offers
+    # array (jsonb_path_ops) and an equality test on the winning seller. There is no
+    # seller_id column — the winner lives in the document.
+    "CREATE INDEX IF NOT EXISTS jobs_doc_gin_idx ON jobs USING gin (doc jsonb_path_ops)",
+    "CREATE INDEX IF NOT EXISTS jobs_seller_id_idx ON jobs ((doc ->> 'seller_id'))",
+)
+
+# Statuses a run may start from, and the statuses a crashed run may be reclaimed
+# from once its lease has expired. Kept in SQL form so the reclaim is decided by
+# one conditional UPDATE rather than a read-then-write race.
+_RUNNABLE_STATUSES = ["open", "failed"]
+_IN_FLIGHT_STATUSES = [
+    "negotiating",
+    "agreed",
+    "escrowed",
+    "delivered",
+    "verifying",
+    "awaiting_approval",
+]
+# In-flight statuses from which an expired lease means the worker died and the job
+# may be reclaimed. ``awaiting_approval`` is excluded on purpose: it is a paused
+# state waiting on the buyer, not a dead worker, and re-running it would create a
+# second PayPal order. Keep this in step with ``store.RECLAIMABLE_STATUSES``.
+_RECLAIMABLE_STATUSES = [s for s in _IN_FLIGHT_STATUSES if s != "awaiting_approval"]
 
 
 def _lock_key(job_id: str) -> int:
@@ -83,6 +123,8 @@ class PostgresJobStore:
         self.dsn = dsn
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(SCHEMA)
+            for statement in MIGRATIONS:
+                cur.execute(statement)
 
     # ------------------------------------------------------------ plumbing
 
@@ -114,14 +156,19 @@ class PostgresJobStore:
             cur.execute(
                 """
                 INSERT INTO jobs (id, created_at, updated_at, status, escrow_state,
-                                  escrow_capture_id, doc)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                  escrow_capture_id, buyer_id, deleted_at,
+                                  run_lease_expires_at, approval_claimed_at, doc)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
-                    updated_at        = EXCLUDED.updated_at,
-                    status            = EXCLUDED.status,
-                    escrow_state      = EXCLUDED.escrow_state,
-                    escrow_capture_id = EXCLUDED.escrow_capture_id,
-                    doc               = EXCLUDED.doc
+                    updated_at           = EXCLUDED.updated_at,
+                    status               = EXCLUDED.status,
+                    escrow_state         = EXCLUDED.escrow_state,
+                    escrow_capture_id    = EXCLUDED.escrow_capture_id,
+                    buyer_id             = EXCLUDED.buyer_id,
+                    deleted_at           = EXCLUDED.deleted_at,
+                    run_lease_expires_at = EXCLUDED.run_lease_expires_at,
+                    approval_claimed_at  = EXCLUDED.approval_claimed_at,
+                    doc                  = EXCLUDED.doc
                 """,
                 (
                     job.id,
@@ -130,43 +177,134 @@ class PostgresJobStore:
                     job.status.value,
                     job.escrow.state.value,
                     job.escrow.capture_id,
+                    job.buyer_id,
+                    job.deleted_at,
+                    job.run_lease_expires_at,
+                    job.approval_claimed_at,
                     self._jsonb(payload),
                 ),
             )
 
     def get(self, job_id: str) -> Job | None:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT doc FROM jobs WHERE id = %s AND deleted_at IS NULL", (job_id,)
+            )
+            row = cur.fetchone()
+        return self._row_to_job(row[0]) if row else None
+
+    def get_including_deleted(self, job_id: str) -> Job | None:
         with self._connect() as conn:
             return self._load(conn, job_id)
 
-    def list(self, limit: int = 50) -> list[Job]:
+    def list(
+        self,
+        limit: int = 50,
+        *,
+        buyer_id: str | None = None,
+        seller_id: str | None = None,
+    ) -> list[Job]:
+        # Filters are applied in SQL, before LIMIT, so a seller's older jobs are
+        # not dropped just because other buyers posted newer ones. A seller is
+        # party to a job they won (doc.seller_id) or were invited to (an entry in
+        # the doc.offers array). There is no seller_id column, so the winner is
+        # read from the document.
+        clauses = ["deleted_at IS NULL"]
+        params: list[object] = []
+        if buyer_id is not None:
+            clauses.append("buyer_id = %s")
+            params.append(buyer_id)
+        if seller_id is not None:
+            clauses.append(
+                "(doc ->> 'seller_id' = %s OR doc -> 'offers' @> %s::jsonb)"
+            )
+            params.append(seller_id)
+            params.append(json.dumps([{"seller_id": seller_id}]))
+        params.append(limit)
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT doc FROM jobs ORDER BY created_at DESC LIMIT %s", (limit,)
+                f"SELECT doc FROM jobs WHERE {' AND '.join(clauses)} "
+                "ORDER BY created_at DESC LIMIT %s",
+                tuple(params),
             )
             return [self._row_to_job(row[0]) for row in cur.fetchall()]
 
     def delete(self, job_id: str) -> bool:
+        """Tombstone a job. The row is retained so a live authorization is never lost."""
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM jobs WHERE id = %s RETURNING id", (job_id,))
+            cur.execute(
+                """
+                UPDATE jobs
+                SET deleted_at = now(), updated_at = now(),
+                    doc = jsonb_set(doc, '{deleted_at}', to_jsonb(now()::text))
+                WHERE id = %s AND deleted_at IS NULL
+                RETURNING id
+                """,
+                (job_id,),
+            )
             return cur.fetchone() is not None
 
     # ------------------------------------------------- cross-instance guards
 
-    def claim_run(self, job: Job) -> bool:
-        """Atomically move a job out of a runnable state. False means someone else won.
+    def claim_run(self, job: Job, *, lease_seconds: int = 300) -> Job | None:
+        """Atomically move a job out of a runnable state, returning the claimed job.
 
-        The route and the engine both check the status in Python, but two instances
-        can read ``open`` before either writes. This conditional UPDATE is the only
-        place the transition is decided, so it cannot be lost to a race.
+        ``None`` means another worker won. Reclaims a job whose execution lease has
+        expired, so a crashed worker does not wedge the job. The transition is a
+        single conditional UPDATE, so two instances cannot both claim the same job,
+        and the row is re-read inside the same transaction so the caller works from
+        authoritative state (another instance may have changed it since).
         """
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE jobs SET status = 'negotiating', updated_at = now()
-                WHERE id = %s AND status = ANY(%s)
+                UPDATE jobs
+                SET status = 'negotiating',
+                    run_lease_expires_at = now() + make_interval(secs => %s),
+                    updated_at = now()
+                WHERE id = %s
+                  AND deleted_at IS NULL
+                  AND (
+                        status = ANY(%s)
+                     OR (status = ANY(%s) AND escrow_state = 'none'
+                         AND run_lease_expires_at IS NOT NULL
+                         AND run_lease_expires_at < now())
+                  )
                 RETURNING id
                 """,
-                (job.id, ["open", "failed"]),
+                (lease_seconds, job.id, _RUNNABLE_STATUSES, _RECLAIMABLE_STATUSES),
+            )
+            if cur.fetchone() is None:
+                return None
+            # Re-read inside the same connection so the caller gets a record whose
+            # doc agrees with the columns the claim just moved (the UPDATE touches
+            # columns only). Autocommit means the update is already visible here.
+            return self._load(conn, job.id)
+
+    def claim_approval(self, job: Job, *, ttl_seconds: int | None = None) -> bool:
+        """Atomically claim the buyer-approval transition. False means someone else won.
+
+        The claim is keyed off the *escrow* state, not the job status: a first
+        attempt that PayPal rejected before approval leaves the job FAILED but the
+        order still awaiting approval, and that attempt must remain retryable. A
+        claim older than ``ttl_seconds`` is treated as abandoned, so a worker that
+        died between claiming and returning does not lock the buyer out.
+        """
+        ttl = settings.approval_claim_ttl_seconds if ttl_seconds is None else ttl_seconds
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE jobs
+                SET approval_claimed_at = now(), updated_at = now()
+                WHERE id = %s AND deleted_at IS NULL
+                  AND escrow_state = 'awaiting_approval'
+                  AND (
+                        approval_claimed_at IS NULL
+                     OR approval_claimed_at < now() - make_interval(secs => %s)
+                  )
+                RETURNING id
+                """,
+                (job.id, ttl),
             )
             return cur.fetchone() is not None
 
