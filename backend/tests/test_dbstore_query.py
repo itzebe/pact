@@ -8,7 +8,61 @@ seller's older jobs vanishing because the filter ran after a global truncation.
 
 from __future__ import annotations
 
-from pact.core.dbstore import PostgresJobStore
+import re
+
+from pact.core.dbstore import MIGRATIONS, SCHEMA, PostgresJobStore
+
+
+def _statements(sql: str) -> list[str]:
+    """Split a schema blob into individual statements (comments stripped)."""
+    without_comments = re.sub(r"--[^\n]*", "", sql)
+    return [s.strip() for s in without_comments.split(";") if s.strip()]
+
+
+# Columns that only MIGRATIONS adds to a database created by the *original*
+# release. A statement that references one of these must not run before the ALTER
+# that creates it.
+_LATE_COLUMNS = ("buyer_id", "deleted_at", "run_lease_expires_at", "approval_claimed_at")
+
+
+def test_schema_never_references_a_column_that_only_a_migration_adds():
+    """An index on a not-yet-added column makes startup fail before the migration.
+
+    ``CREATE TABLE IF NOT EXISTS`` is a no-op on an existing database, so the new
+    columns arrive via ALTER in MIGRATIONS. If SCHEMA created an index over one of
+    them, an already-deployed database would raise ``UndefinedColumn`` at startup —
+    before the ALTER that adds the column ever ran, i.e. the migration would be dead
+    code on exactly the databases it exists for.
+    """
+    for statement in _statements(SCHEMA):
+        for column in _LATE_COLUMNS:
+            assert column not in statement, (
+                f"SCHEMA references late column {column!r} before MIGRATIONS adds it: "
+                f"{statement!r}"
+            )
+
+
+def test_each_late_column_is_added_before_the_index_that_uses_it():
+    seen_columns: set[str] = set()
+    statements = list(MIGRATIONS)
+    for statement in statements:
+        upper = statement.upper()
+        if upper.startswith("ALTER TABLE") and "ADD COLUMN" in upper:
+            for column in _LATE_COLUMNS:
+                if f" {column} " in statement or statement.rstrip().endswith(column):
+                    seen_columns.add(column)
+        if upper.startswith("CREATE INDEX"):
+            for column in _LATE_COLUMNS:
+                if column in statement:
+                    assert column in seen_columns, (
+                        f"index on {column!r} is declared before the ALTER that adds it"
+                    )
+
+
+def test_the_seller_filter_indexes_are_present():
+    joined = " ".join(MIGRATIONS)
+    assert "jobs_seller_id_idx" in joined
+    assert "jobs_doc_gin_idx" in joined and "jsonb_path_ops" in joined
 
 
 class _Recorder:

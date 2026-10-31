@@ -34,19 +34,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     status             TEXT NOT NULL,
     escrow_state       TEXT NOT NULL,
     escrow_capture_id  TEXT NOT NULL DEFAULT '',
-    buyer_id           TEXT NOT NULL DEFAULT '',
-    deleted_at         TIMESTAMPTZ,
-    run_lease_expires_at TIMESTAMPTZ,
-    approval_claimed_at  TIMESTAMPTZ,
     doc                JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS jobs_created_at_idx ON jobs (created_at DESC);
-CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status);
-CREATE INDEX IF NOT EXISTS jobs_buyer_id_idx ON jobs (buyer_id);
--- Supports the seller filter in ``list``: a containment test over the offers
--- array (jsonb_path_ops) and an equality test on the winning seller.
-CREATE INDEX IF NOT EXISTS jobs_doc_gin_idx ON jobs USING gin (doc jsonb_path_ops);
-CREATE INDEX IF NOT EXISTS jobs_seller_id_idx ON jobs ((doc ->> 'seller_id'));
 
 CREATE TABLE IF NOT EXISTS reputation (
     agent_id TEXT PRIMARY KEY,
@@ -54,15 +43,26 @@ CREATE TABLE IF NOT EXISTS reputation (
 );
 """
 
-# Columns added after the first release. ``CREATE TABLE IF NOT EXISTS`` does not
-# alter an existing table, so an already-deployed database needs these explicitly.
-# Each is idempotent, so this is safe to run on every startup.
+# Columns and indexes added after the first release. ``CREATE TABLE IF NOT EXISTS``
+# does not alter an existing table, so an already-deployed database needs these
+# explicitly. They run *before* any statement that references the new columns:
+# SCHEMA intentionally creates only the original columns, because a table-wide
+# index on a column that an older database does not yet have would fail at startup
+# before the migration that adds it could run. Each statement is idempotent, so
+# this is safe on every boot.
 MIGRATIONS = (
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS buyer_id TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS run_lease_expires_at TIMESTAMPTZ",
     "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS approval_claimed_at TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS jobs_created_at_idx ON jobs (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status)",
     "CREATE INDEX IF NOT EXISTS jobs_buyer_id_idx ON jobs (buyer_id)",
+    # Supports the seller filter in ``list``: a containment test over the offers
+    # array (jsonb_path_ops) and an equality test on the winning seller. There is no
+    # seller_id column — the winner lives in the document.
+    "CREATE INDEX IF NOT EXISTS jobs_doc_gin_idx ON jobs USING gin (doc jsonb_path_ops)",
+    "CREATE INDEX IF NOT EXISTS jobs_seller_id_idx ON jobs ((doc ->> 'seller_id'))",
 )
 
 # Statuses a run may start from, and the statuses a crashed run may be reclaimed

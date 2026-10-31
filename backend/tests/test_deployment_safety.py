@@ -13,6 +13,7 @@ These tests pin the behaviour that prevents both.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,33 @@ from pathlib import Path
 import pytest
 
 BACKEND = Path(__file__).resolve().parents[1]
+REPO = BACKEND.parent
+
+
+def test_requirements_file_declares_every_runtime_dependency():
+    """The image installs from requirements.txt, so it must not omit a dependency.
+
+    A dependency declared in pyproject.toml but missing here is silently absent
+    from the Docker image. That is exactly how PyJWT went missing (every
+    authenticated request raised ModuleNotFoundError) and how uvicorn was dropped
+    (the container could not start at all). Parse both and require parity for the
+    core runtime packages.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads((BACKEND / "pyproject.toml").read_text())
+    declared = {
+        re.split(r"[<>=!\[ ]", dep, maxsplit=1)[0].lower()
+        for dep in pyproject["project"]["dependencies"]
+    }
+    text = (REPO / "requirements.txt").read_text()
+    pinned = {
+        re.split(r"[<>=!\[ ]", line.strip(), maxsplit=1)[0].lower()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    missing = declared - pinned
+    assert not missing, f"requirements.txt is missing runtime deps: {sorted(missing)}"
 
 
 def _run_snippet(code: str, env_extra: dict[str, str] | None = None) -> dict:
