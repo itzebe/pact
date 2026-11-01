@@ -114,3 +114,31 @@ export const money = (value, currency = 'USD') => {
 }
 
 export const shortHash = (hash) => (hash ? `${hash.slice(0, 8)}…${hash.slice(-4)}` : '')
+
+/**
+ * Poll a job until its escrow state stops changing, or the attempt budget runs out.
+ *
+ * A webhook or a reconciliation can move a payment on the server while the browser
+ * is sitting still — a buyer who approves in PayPal then returns, or an operator
+ * who reconciles an ambiguous capture. The SSE stream covers ledger writes, but a
+ * webhook-driven settlement can land when no stream is open, so the payment panel
+ * polls a bounded number of times rather than showing a stale "held".
+ *
+ * Returns the last job seen. Never throws for a transient fetch error: a payment
+ * panel that blanks on one failed poll is worse than one that keeps the last known
+ * state.
+ */
+export async function pollJob(jobId, { attempts = 6, intervalMs = 2000, isDone, onUpdate } = {}) {
+  let last = null
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      last = await api.job(jobId)
+      onUpdate?.(last)
+      if (isDone ? isDone(last) : false) return last
+    } catch {
+      // keep the previous reading; try again
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return last
+}
