@@ -12,10 +12,12 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app/backend
 
-COPY backend/pyproject.toml ./
+# Install from the pinned requirements file, not an inline list: an inline list
+# silently drifted from the real dependencies, and a missing PyJWT meant the image
+# booted but every authenticated request raised ModuleNotFoundError.
+COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-        fastapi "uvicorn[standard]" httpx pydantic python-dotenv sse-starlette "psycopg[binary]"
+    pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./
 COPY --from=web /web/dist /app/static

@@ -12,6 +12,17 @@ services:
       mountPath: /data
       sizeGB: 1
     envVars:
+      - key: PACT_ENV
+        value: development
+      # Required. Generate a value and set it here (or as a secret). Without it the
+      # API fails closed and refuses every protected request.
+      - key: PACT_AUTH_SECRET
+        generateValue: true
+      - key: PACT_ALLOWED_HOSTS
+        fromService:
+          type: web
+          name: pact
+          property: host
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
@@ -28,7 +39,9 @@ services:
         value: /data
       - key: PACT_CURRENCY
         value: USD
-      # Left true so the demo still works if a visitor has no credentials of
-      # their own. Set to false to require real PayPal settlement.
+      # The demo runs without PayPal credentials by default so a visitor can still
+      # see the full lifecycle. It is labelled "Simulated PayPal" everywhere, and
+      # PACT_ENV=development is what permits the mock. Add real credentials (and
+      # drop this) to settle for real.
       - key: PACT_ALLOW_MOCK_PAYPAL
         value: "true"

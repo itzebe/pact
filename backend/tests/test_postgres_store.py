@@ -642,3 +642,92 @@ def test_the_reputation_race_is_real_without_the_row_lock(clean_db):
         "the negative control did not lose any update, so the guarded test is not "
         "load-bearing; the row lock is not what protects this path"
     )
+
+
+# --------------------------------------------------- lease recovery (Postgres)
+# The same crash-recovery guarantees, but decided by the database's conditional
+# UPDATE rather than an in-process lock — the case that actually matters when two
+# instances run behind a load balancer.
+
+
+def _crashed_job(store, *, status="negotiating", escrow_state="none", lease_expired=True):
+    from datetime import datetime, timedelta, timezone
+    from decimal import Decimal
+
+    from pact.core.models import EscrowState, JobStatus
+
+    engine = _engine(store, PostgresReputationLedger(DATABASE_URL))
+    job = engine.create_job(title="Crash", brief="b", criteria=CRITERIA,
+                            budget_max=Decimal("100"))
+    job.status = JobStatus(status)
+    job.escrow.state = EscrowState(escrow_state)
+    delta = timedelta(seconds=-10 if lease_expired else 300)
+    job.run_lease_expires_at = datetime.now(timezone.utc) + delta
+    store.save(job)
+    return job
+
+
+def test_an_expired_lease_is_reclaimed_from_the_database(clean_db):
+    store, ledger = clean_db
+    job = _crashed_job(store)
+    # A *different* store instance reclaims it, exactly as a second worker would.
+    other = PostgresJobStore(DATABASE_URL)
+    claimed = other.claim_run(job, lease_seconds=120)
+    assert claimed is not None
+    assert claimed.status.value == "negotiating"
+    assert claimed.run_lease_expires_at is not None
+
+
+def test_a_live_lease_is_not_reclaimed_from_the_database(clean_db):
+    store, ledger = clean_db
+    job = _crashed_job(store, lease_expired=False)
+    other = PostgresJobStore(DATABASE_URL)
+    assert other.claim_run(job, lease_seconds=120) is None
+
+
+def test_a_job_with_funds_held_is_not_reclaimed_from_the_database(clean_db):
+    """Re-running a job that already holds money would double-charge."""
+    store, ledger = clean_db
+    job = _crashed_job(store, status="delivered", escrow_state="held")
+    other = PostgresJobStore(DATABASE_URL)
+    assert other.claim_run(job, lease_seconds=120) is None
+
+
+def test_the_reclaim_is_atomic_across_instances(clean_db):
+    """Two separate store instances race; exactly one may win the reclaim."""
+    import threading
+
+    store, ledger = clean_db
+    job = _crashed_job(store)
+    winners: list[bool] = []
+    barrier = threading.Barrier(4)
+
+    def attempt() -> None:
+        local = PostgresJobStore(DATABASE_URL)
+        barrier.wait(timeout=10)
+        winners.append(local.claim_run(job, lease_seconds=120) is not None)
+
+    threads = [threading.Thread(target=attempt) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert sum(winners) == 1
+
+
+def test_an_abandoned_approval_claim_expires_in_the_database(clean_db):
+    import psycopg
+
+    store, ledger = clean_db
+    job = _crashed_job(store, status="awaiting_approval", escrow_state="awaiting_approval")
+    other = PostgresJobStore(DATABASE_URL)
+    assert other.claim_approval(job, ttl_seconds=120) is True
+    # A live claim cannot be retaken...
+    assert other.claim_approval(job, ttl_seconds=120) is False
+    # ...but once it is older than the TTL it is treated as abandoned.
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET approval_claimed_at = now() - make_interval(secs => 10000) WHERE id = %s",
+            (job.id,),
+        )
+    assert other.claim_approval(job, ttl_seconds=120) is True

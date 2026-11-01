@@ -1,12 +1,16 @@
 # Runtime dependencies for the Vercel Python runtime.
 #
-# Kept in sync with backend/pyproject.toml. psycopg is included because Vercel has
-# no durable disk, so the ledger must live in an external Postgres (set
-# DATABASE_URL). Without it the app still runs, but only on the mock escrow and
-# with non-durable storage.
+# Kept in sync with backend/pyproject.toml. This file is also what the Dockerfile
+# installs, so it must be complete: a dependency present in pyproject but missing
+# here is missing from the image. uvicorn is required to run the app; psycopg is
+# included because Vercel has no durable disk, so the ledger must live in an
+# external Postgres (set DATABASE_URL). Without it the app still runs, but only on
+# the mock escrow and with non-durable storage.
 fastapi>=0.115
+uvicorn[standard]>=0.32
 httpx>=0.27
 pydantic>=2.9
 python-dotenv>=1.0
 sse-starlette>=2.1
+PyJWT>=2.8
 psycopg[binary]>=3.2

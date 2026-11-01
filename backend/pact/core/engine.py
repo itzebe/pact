@@ -14,7 +14,10 @@ refund path is the reason escrow is used at all rather than immediate capture.
 from __future__ import annotations
 
 import logging
+import threading
+from contextlib import contextmanager
 from decimal import Decimal
+from typing import Any, Iterator
 
 from ..config import settings
 from ..agents.seller import SellerAgent
@@ -30,6 +33,14 @@ log = logging.getLogger("pact.engine")
 
 class JobAlreadyRunning(RuntimeError):
     """Raised when a job that is already mid-flight is asked to run again."""
+
+
+class ServerBusy(RuntimeError):
+    """Raised when too many runs are already in flight in this process."""
+
+
+class RunDeadlineExceeded(RuntimeError):
+    """Raised when a run exceeds its internal deadline before the platform kills it."""
 
 
 class PactEngine:
@@ -49,6 +60,24 @@ class PactEngine:
         self.negotiation = NegotiationEngine(self.llm, max_rounds=max_rounds)
         self.verifier = Verifier(self.llm)
         self.settlement = SettlementEngine(self.escrow, self.reputation, store=self.store)
+        # Bound how many runs execute at once. Without this, every arriving request
+        # starts an LLM loop and the process melts under load rather than shedding
+        # it. The semaphore is released in a finally, so a failed run never leaks a
+        # slot.
+        self._run_slots = threading.BoundedSemaphore(settings.max_concurrent_runs)
+
+    @contextmanager
+    def _run_slot(self) -> Iterator[None]:
+        """Acquire a run slot, or refuse quickly. Never blocks without bound."""
+        acquired = self._run_slots.acquire(timeout=settings.run_queue_timeout_seconds)
+        if not acquired:
+            raise ServerBusy(
+                "The server is at its concurrent-run limit; retry shortly"
+            )
+        try:
+            yield
+        finally:
+            self._run_slots.release()
 
     # ------------------------------------------------------------- helpers
 
@@ -66,6 +95,12 @@ class PactEngine:
             currency=currency or settings.currency,
             buyer_id=buyer_id,
         )
+        # Stamp the escrow record's mode up front from the *actual* client, not the
+        # record default. Without this a job created on a mock deployment would
+        # report ``settlement_is_real: true`` until the first hold, which is exactly
+        # the "simulated settlement presented as real" mistake this field exists to
+        # prevent.
+        self._stamp_escrow_mode(job)
         job.append(
             "job_created",
             buyer_id,
@@ -77,27 +112,99 @@ class PactEngine:
         self.store.save(job)
         return job
 
+    def _stamp_escrow_mode(self, job: Job) -> None:
+        """Record whether this job's escrow will be real, from the live client."""
+        mode = self.settlement.mode
+        job.escrow.mode = mode
+        job.escrow.simulated = mode == "mock"
+
     # ----------------------------------------------------------- lifecycle
 
     def run(self, job: Job, seller_ids: list[str] | None = None, *, public_url: str | None = None) -> Job:
+        """Drive the job to a terminal state, inside a slot and a hard deadline.
+
+        Two failure modes are handled here rather than by the platform:
+
+        * Under load, more runs arriving than the process can serve are refused
+          with ``ServerBusy`` (surfaced as 429) instead of queueing without bound.
+        * A run that exceeds ``PACT_RUN_TIMEOUT_SECONDS`` — the platform's own
+          function timeout is the backstop — is abandoned *before* the platform
+          kills the process, and the job is marked failed with its lease released.
+          That is what stops a slow run from leaving a job stuck in ``negotiating``
+          forever with no worker and no expiry.
+        """
+        with self._run_slot():
+            return self._with_deadline(self._run_inner, job, seller_ids, public_url=public_url)
+
+    def _with_deadline(self, fn, job: Job, *args, **kwargs) -> Job:
+        """Run ``fn(job, ...)`` in a worker thread, bounded by the run deadline."""
+        result: dict[str, Any] = {}
+
+        def target() -> None:
+            try:
+                result["job"] = fn(job, *args, **kwargs)
+            except BaseException as exc:  # captured and re-raised on the caller's thread
+                result["error"] = exc
+
+        worker = threading.Thread(target=target, daemon=True)
+        worker.start()
+        worker.join(timeout=settings.run_timeout_seconds)
+        if worker.is_alive():
+            # The worker is stuck in a blocking provider/LLM call. We cannot safely
+            # kill it, but we can stop waiting and make the job's state honest: the
+            # lease is expired and the job is failed, so it is not wedged.
+            self._abandon(job, "run exceeded its time budget")
+            raise RunDeadlineExceeded(
+                f"Job {job.id} exceeded the {settings.run_timeout_seconds}s run budget"
+            )
+        if "error" in result:
+            raise result["error"]
+        return result["job"]
+
+    def _abandon(self, job: Job, reason: str) -> None:
+        """Mark a job failed and release its lease, best-effort."""
+        try:
+            fresh = self.store.get(job.id)
+            if fresh is None:
+                return
+            fresh.status = JobStatus.FAILED
+            fresh.run_lease_expires_at = None
+            fresh.append("run_abandoned", "pact", reason)
+            self.store.save(fresh)
+        except Exception as exc:  # a store failure must not mask the timeout
+            log.error("Could not record abandonment of %s: %s", job.id, exc)
+
+    def _run_inner(self, job: Job, seller_ids: list[str] | None = None, *, public_url: str | None = None) -> Job:
         """Drive the job to a terminal state. Never raises on a failed settlement.
 
         Concurrency: a job that is already mid-flight is refused rather than run
         twice, so two simultaneous settlement requests cannot produce a duplicate
         capture or contradictory terminal states.
         """
-        if job.status not in {JobStatus.OPEN, JobStatus.FAILED}:
+        # The atomic claim is the *only* decision about whether this run may
+        # proceed — there is deliberately no status pre-check in front of it. A
+        # pre-check reads this process's copy and cannot see another worker's
+        # claim, and (worse) it rejected the very in-flight states a crashed
+        # worker leaves behind, so an expired lease could never be reclaimed
+        # through the engine at all. ``claim_run`` allows a job that is runnable
+        # or whose lease has expired, and refuses one whose lease is still live,
+        # so two live workers cannot both proceed and a hard-killed worker does
+        # not brick the job. It returns the freshly claimed record (None if
+        # another worker won) so we operate on authoritative state.
+        claimed = self.store.claim_run(job, lease_seconds=settings.lease_seconds)
+        if claimed is None:
             raise JobAlreadyRunning(
-                f"Job {job.id} is {job.status.value}; refusing to run it again"
+                f"Job {job.id} is already being run (or its lease is still live); "
+                f"refusing to run it again"
             )
-
-        # Claim the job atomically. The check above reads this process's copy; the
-        # claim is what actually decides the transition, so two instances that both
-        # read "open" cannot both proceed.
-        if not self.store.claim_run(job):
-            raise JobAlreadyRunning(
-                f"Job {job.id} was claimed by another run; refusing to run it again"
-            )
+        # Adopt the authoritative state into the caller's object rather than
+        # rebinding, so a run keeps mutating the handle the caller passed in — the
+        # contract every other transition relies on. On Postgres the claim returns
+        # a freshly loaded row, which is a different object.
+        if claimed is not job:
+            job.__dict__.update(claimed.__dict__)
+        if job.is_deleted:
+            raise JobAlreadyRunning(f"Job {job.id} has been deleted; refusing to run it")
 
         seller_ids = seller_ids or default_seller_ids()
         job.status = JobStatus.NEGOTIATING
@@ -234,14 +341,29 @@ class PactEngine:
         return job
 
     def approve_and_hold(self, job: Job) -> Job:
-        """Continue a job whose order the buyer has now approved."""
+        """Continue a job whose order the buyer has now approved.
+
+        The approval transition is claimed atomically *before* any provider call,
+        so two concurrent approvals cannot both proceed to authorize the buyer's
+        funds. A second caller loses the claim and gets a conflict, and a repeated
+        request on an already-continued job is likewise refused rather than run
+        again.
+        """
         if job.escrow.state != EscrowState.AWAITING_APPROVAL:
             raise ValueError(f"Job is not awaiting approval (escrow state {job.escrow.state})")
+        if not self.store.claim_approval(job):
+            raise ValueError("Buyer approval was already claimed for this job")
         try:
             self.settlement.authorize_hold(job)
         except (PayPalError, ValueError) as exc:
             if not getattr(exc, "ambiguous", False):
                 job.status = JobStatus.FAILED
+                # Release the claim. PayPal rejected the authorize before the buyer
+                # approved, which burns nothing, so the buyer must be able to retry
+                # after approving. The claim exists only to stop two approvals
+                # racing; once this attempt has definitively failed there is no race
+                # to lose.
+                job.approval_claimed_at = None
                 job.append("escrow_error", "pact", f"Could not escrow funds: {exc}")
             self.store.save(job)
             return job
@@ -278,6 +400,16 @@ class PactEngine:
         established, rather than being guessed either way.
         """
         return self.settlement.reconcile(job)
+
+    def cancel_job(self, job: Job, reason: str = "") -> Job:
+        """Unwind a job's financial exposure so it can be safely deleted.
+
+        Delegates to the settlement engine, which voids any outstanding hold (and
+        confirms it) rather than discarding it. A job whose money has already
+        moved, or whose fate is unknown, is refused — it must be reconciled
+        first, never deleted out from under a live authorization.
+        """
+        return self.settlement.cancel(job, reason=reason)
 
 
 engine = PactEngine()

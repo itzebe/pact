@@ -9,6 +9,7 @@ to record a success the provider has not confirmed.
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -397,7 +398,12 @@ def test_approval_url_is_read_from_hateoas_links():
 
 def test_a_job_that_is_already_running_is_refused(engine):
     job = make_job(engine)
+    # Model a run that is genuinely in flight: a live worker holds a live lease.
+    # (Setting the status alone would be a job that no worker owns, which the
+    # engine may legitimately reclaim once the lease has lapsed.)
     job.status = JobStatus.VERIFYING
+    job.run_lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=300)
+    engine.store.save(job)
     with pytest.raises(JobAlreadyRunning):
         engine.run(job)
 
@@ -407,6 +413,133 @@ def test_a_settled_job_cannot_be_run_again(engine):
     assert job.status is JobStatus.SETTLED
     with pytest.raises(JobAlreadyRunning):
         engine.run(job)
+
+
+# ------------------------------------------------- lease recovery (crash safety)
+# A worker that is hard-killed mid-run (a serverless timeout, a SIGKILL) leaves a
+# job in an in-flight status with a dead lease. Before this was fixed the engine
+# refused every in-flight status *before* consulting the store, so such a job
+# could never be reclaimed through the API and was wedged forever.
+
+
+def _crash_mid_run(engine, status=JobStatus.NEGOTIATING, *, lease_live=False,
+                   escrow_state=EscrowState.NONE):
+    """Persist a job exactly as a hard-killed worker leaves it."""
+    job = make_job(engine)
+    job.status = status
+    job.escrow.state = escrow_state
+    delta = timedelta(seconds=300 if lease_live else -10)
+    job.run_lease_expires_at = datetime.now(timezone.utc) + delta
+    engine.store.save(job)
+    return job
+
+
+def test_a_job_whose_lease_expired_can_be_reclaimed(engine):
+    """The exact failure the review found: store.claim_run succeeded, but the
+    engine raised JobAlreadyRunning for the same job."""
+    job = _crash_mid_run(engine)
+    # The store is willing to reclaim it...
+    assert engine.store.claim_run(job) is not None
+    # ...and so, now, is the engine. (Re-seed: the probe above consumed the claim.)
+    job = _crash_mid_run(engine)
+    recovered = engine.run(job, seller_ids=["seller_nova"])
+    assert recovered.status in {JobStatus.SETTLED, JobStatus.VOIDED}
+    assert any(e.kind == "run_recovered" for e in recovered.ledger)
+
+
+def test_a_live_lease_is_never_reclaimed(engine):
+    """Two live workers must not both run the same job."""
+    job = _crash_mid_run(engine, lease_live=True)
+    with pytest.raises(JobAlreadyRunning):
+        engine.run(job, seller_ids=["seller_nova"])
+
+
+def test_a_run_in_flight_with_funds_held_is_not_reclaimed(engine):
+    """Re-running a job that already holds funds would double-charge.
+
+    A post-money crash (escrow held, delivery in flight) must be recovered by
+    settling or cancelling, never by re-running the whole lifecycle.
+    """
+    job = _crash_mid_run(engine, status=JobStatus.DELIVERED, escrow_state=EscrowState.HELD)
+    assert engine.store.claim_run(job) is None
+    with pytest.raises(JobAlreadyRunning):
+        engine.run(job, seller_ids=["seller_nova"])
+
+
+def test_an_awaiting_approval_job_is_not_reclaimed_by_a_run(engine):
+    """Approval is a paused state, not a dead worker: re-running would create a
+    second PayPal order."""
+    job = _crash_mid_run(engine, status=JobStatus.AWAITING_APPROVAL)
+    assert engine.store.claim_run(job) is None
+    with pytest.raises(JobAlreadyRunning):
+        engine.run(job, seller_ids=["seller_nova"])
+
+
+def test_reclaim_is_atomic_under_concurrency(engine):
+    """Exactly one of several racing reclaims may win."""
+    job = _crash_mid_run(engine)
+    winners: list[bool] = []
+    barrier = threading.Barrier(6)
+
+    def attempt() -> None:
+        barrier.wait(timeout=5)
+        winners.append(engine.store.claim_run(job) is not None)
+
+    threads = [threading.Thread(target=attempt) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(winners) == 1, "exactly one racer must win the reclaim"
+
+
+# --------------------------------------------- buyer-approval claim recovery
+# The claim that stops two approvals racing must not outlive the attempt: a worker
+# that dies between claiming and returning would otherwise lock the buyer out of
+# their own order forever.
+
+
+class NeedsApprovalForRecovery(ScriptedEscrow):
+    auto_approves = False
+
+
+def _awaiting_job(tmp_path):
+    engine = PactEngine(
+        llm=MockLLM(), escrow=NeedsApprovalForRecovery(),
+        store=JobStore(tmp_path / "j"), reputation_ledger=ReputationLedger(tmp_path / "r.json"),
+    )
+    job = engine.run(make_job(engine), seller_ids=["seller_nova"])
+    assert job.status is JobStatus.AWAITING_APPROVAL
+    return engine, job
+
+
+def test_an_abandoned_approval_claim_can_be_recovered(tmp_path):
+    """A claim left by a crashed approver must expire, so the buyer can retry."""
+    engine, job = _awaiting_job(tmp_path)
+    assert engine.store.claim_approval(job) is True
+    # While the claim is live, a second attempt is refused (no double authorize).
+    assert engine.store.claim_approval(job) is False
+    # Once it is older than the TTL, it is treated as abandoned and can be retaken.
+    job.approval_claimed_at = datetime.now(timezone.utc) - timedelta(seconds=10_000)
+    engine.store.save(job)
+    assert engine.store.claim_approval(job) is True
+
+
+def test_a_recovered_approval_still_authorizes_only_once(tmp_path):
+    """Recovery must not break the single-authorize guarantee."""
+    engine, job = _awaiting_job(tmp_path)
+    escrow = engine.escrow
+    assert engine.store.claim_approval(job) is True
+    # Expire the abandoned claim, then approve for real.
+    job.approval_claimed_at = datetime.now(timezone.utc) - timedelta(seconds=10_000)
+    engine.store.save(job)
+    engine.approve_and_hold(job)
+    authorizes = escrow.calls.count("authorize_order")
+    assert authorizes == 1
+    # The job is now settled; a second approval is refused and never authorizes again.
+    with pytest.raises(ValueError):
+        engine.approve_and_hold(job)
+    assert escrow.calls.count("authorize_order") == 1
 
 
 # --------------------------------------------------------------- invariant K

@@ -77,6 +77,8 @@ source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 cp ../.env.example ../.env      # fill in credentials, or leave blank
+# Generate the API signing secret and put it in ../.env as PACT_AUTH_SECRET:
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
 uvicorn pact.main:app --reload --port 8000
 ```
 
@@ -88,7 +90,18 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
-Open http://localhost:5173, pick a job preset, and press **Post job and settle**. The full lifecycle runs and streams into the UI as it happens.
+Mint a token for the UI to use, then paste it into the connect screen:
+
+```bash
+cd ../backend
+python -m scripts.issue_token demo-buyer buyer
+```
+
+Open http://localhost:5173, paste the token, pick a job preset, and press **Post job and settle**. The full lifecycle runs and streams into the UI as it happens.
+
+> The API holds and moves money, so it serves no anonymous caller: without a
+> token every protected route returns `401`, and without `PACT_AUTH_SECRET`
+> configured it returns `503`. See [Authentication](#authentication).
 
 ### 3. Tests
 
@@ -103,7 +116,7 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 218 passed, 16 skipped (the Postgres tests skip themselves).
+# 294 passed, 38 skipped (the Postgres tests skip themselves).
 python -m pytest tests/ -q
 ```
 
@@ -116,7 +129,7 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 234 passed — nothing skipped.
+# 332 passed — nothing skipped.
 createdb pact                                          # or a Neon/Supabase/RDS URL
 export DATABASE_URL=postgresql://localhost/pact
 python -m pytest tests/ -q
@@ -133,7 +146,13 @@ Frontend unit tests (Node's built-in runner, no extra dependency):
 cd frontend && npm test
 ```
 
-234 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
+Both suites, plus pyflakes and the production Docker build, run on every pull
+request into `master` and on every push to the security branch. The backend job
+starts a real PostgreSQL 16 service and fails if the Postgres tests skip, so the
+cross-instance guarantees cannot silently go unexercised. See
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+332 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, shared single-use SSE-ticket consumption (with a four-process cross-instance race and a negative control), the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
 
 ---
 
@@ -143,12 +162,13 @@ Pact is designed so a reviewer can clone it and see the complete lifecycle with 
 
 | Missing | Behaviour |
 |---|---|
+| `PACT_AUTH_SECRET` | The API fails closed: every protected route returns `503`. Nothing is served anonymously. |
 | `PAYPAL_CLIENT_ID` / `SECRET` | Escrow runs against an in-memory double that enforces the same state machine. Every id is prefixed `MOCK-` and the UI labels it **Simulated PayPal** so it can never be mistaken for real money movement. |
 | `LLM_API_KEY` | Agents fall back to a deterministic policy engine. The UI labels it **Mock agents**. |
 
-Both fallbacks are deliberately loud. A simulated settlement must never be confused with a real one.
+All fallbacks are deliberately loud. A simulated settlement must never be confused with a real one, and an unauthenticated deployment is unusable rather than open.
 
-To require real credentials and refuse the mock path, set `PACT_ALLOW_MOCK_PAYPAL=false`. To make missing credentials a hard startup failure on a deployment where settlement must be real, set `PACT_REQUIRE_REAL_PAYPAL=true` — otherwise a production deploy with no credentials would settle against the in-memory double and report a `settled` job for which no money ever moved.
+To require real credentials and refuse the mock path, set `PACT_ALLOW_MOCK_PAYPAL=false`. To make missing credentials a hard startup failure on a deployment where settlement must be real, set `PACT_REQUIRE_REAL_PAYPAL=true` — otherwise a production deploy with no credentials would settle against the in-memory double and report a `settled` job for which no money ever moved. In production (any `PACT_ENV` other than `development`/`test`) the mock is refused outright, regardless of `PACT_ALLOW_MOCK_PAYPAL`.
 
 ---
 
@@ -233,20 +253,59 @@ This is what makes the output defensible as a financial record rather than an ap
 
 ## API
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/health` | Configuration and settlement mode |
-| `POST` | `/api/jobs` | Post a job |
-| `POST` | `/api/jobs/{id}/run` | Run the full lifecycle |
-| `POST` | `/api/jobs/{id}/approve` | Continue after the buyer approves the PayPal order |
-| `POST` | `/api/jobs/{id}/reconcile` | Resolve an `unresolved` job by reading PayPal |
-| `GET` | `/api/jobs/{id}` | Full job state |
-| `GET` | `/api/jobs/{id}/ledger` | Audit trail + chain validity |
-| `GET` | `/api/jobs/{id}/stream` | Server-sent events, live |
-| `GET` | `/api/reputation` | Agent reputation |
-| `GET` | `/api/ledger` | Every settlement decision, newest first |
+Every route below `/api` except `/api/health` requires a bearer token. The
+required role is listed per route; `buyer` and `seller` are scoped to their own
+jobs, and `admin` sees and acts on everything.
+
+| Method | Path | Role | Purpose |
+|---|---|---|---|
+| `GET` | `/api/health` | public | Configuration and settlement mode |
+| `POST` | `/api/jobs` | buyer | Post a job (the buyer identity comes from the token) |
+| `GET` | `/api/jobs` | any | List jobs visible to the caller |
+| `GET` | `/api/jobs/{id}` | owner | Full job state |
+| `POST` | `/api/jobs/{id}/run` | owner buyer | Run the full lifecycle |
+| `POST` | `/api/jobs/{id}/approve` | owner buyer | Continue after the buyer approves the PayPal order |
+| `POST` | `/api/jobs/{id}/cancel` | owner buyer | Void any hold so the job can be deleted |
+| `POST` | `/api/jobs/{id}/reconcile` | admin | Resolve an `unresolved` job by reading PayPal |
+| `DELETE` | `/api/jobs/{id}` | admin | Tombstone a fully resolved job |
+| `GET` | `/api/jobs/{id}/ledger` | owner | Audit trail + chain validity |
+| `POST` | `/api/jobs/{id}/stream-ticket` | owner | Mint a short-lived, job-scoped ticket for the live stream |
+| `GET` | `/api/jobs/{id}/stream` | owner | Server-sent events, live (`?ticket=` or `Authorization` header) |
+| `GET` | `/api/jobs/{id}/paypal-order` | admin | The provider's own order record, redacted |
+| `GET` | `/api/reputation` | any | Agent reputation |
+| `GET` | `/api/ledger` | any (scoped) | Settlement decisions visible to the caller, newest first |
 
 Interactive docs at `http://localhost:8000/docs`.
+
+---
+
+## Authentication
+
+Pact holds and moves money, so it does not serve an anonymous caller. A request
+carries a signed bearer token; the caller's identity — buyer, seller, or admin —
+is *derived* from the verified signature, never trusted from the request body. A
+buyer can only read and drive their own jobs; reconciliation, deletion, and the
+global views require an admin token.
+
+Set the signing secret once:
+
+```bash
+export PACT_AUTH_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+```
+
+Mint a token for a principal:
+
+```bash
+cd backend
+TOKEN=$(python -m scripts.issue_token demo-buyer buyer)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/jobs
+```
+
+The API **fails closed**: with no `PACT_AUTH_SECRET` configured, every protected
+route returns `503` rather than serving without authentication. In the browser,
+the UI asks for a token once and keeps it in local storage.
+
+See [`docs/AUTH.md`](docs/AUTH.md) for the role model and the threat it addresses.
 
 ---
 
@@ -263,6 +322,12 @@ instances may serve the same job. Two things follow, and both are handled:
   advisory lock per job and re-reads the authoritative row inside it, so two
   instances cannot both capture the same authorization. The filesystem store
   cannot do this; its `threading.RLock` only protects one process.
+- **Single-use state must be shared too.** The consumed-SSE-ticket registry also
+  moves into Postgres, so a captured stream URL cannot be replayed against a
+  different instance. With `DATABASE_URL` unset the registry is process-local,
+  which is only correct for a single-instance deployment; if the database is
+  configured but unreachable, stream tickets are refused rather than accepted
+  locally.
 
 The repository is already configured — `vercel.json` builds the frontend and
 routes `/api/*` to the FastAPI function in `api/index.py`.

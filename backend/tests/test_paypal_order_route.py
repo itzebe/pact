@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> TestClient:
     from pact.api import routes
+    from pact.api.auth import issue_token
     from pact.core.engine import PactEngine
     from pact.core.llm import MockLLM
     from pact.core.store import JobStore, ReputationLedger
@@ -33,7 +34,13 @@ def client(tmp_path, monkeypatch) -> TestClient:
         reputation_ledger=ReputationLedger(tmp_path / "rep.json"),
     )
     monkeypatch.setattr(routes, "engine", engine)
-    return TestClient(app)
+    # The paypal-order route is administrative: it reaches the provider with the
+    # deployment's own credentials, so it requires an admin token.
+    test_client = TestClient(app)
+    test_client.headers.update(
+        {"Authorization": f"Bearer {issue_token('admin', 'admin')}"}
+    )
+    return test_client
 
 
 class _RecordingEscrow:

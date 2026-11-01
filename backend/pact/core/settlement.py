@@ -22,8 +22,7 @@ import logging
 import threading
 import uuid
 from contextlib import contextmanager
-from decimal import Decimal
-from typing import Iterator
+from typing import Any, Iterator
 
 from ..paypal import EscrowBackend, PayPalError
 from ..paypal.escrow import (
@@ -44,7 +43,7 @@ from .models import (
     JobStatus,
     Verification,
 )
-from .store import ReputationLedger
+from .store import ReputationLedger, TERMINAL_ESCROW_STATES
 
 log = logging.getLogger("pact.settlement")
 
@@ -216,20 +215,37 @@ class SettlementEngine:
         self.escrow = escrow
         self.reputation = reputation
         self.store = store
-        # Guards the transition into a terminal settlement state. Without it, two
-        # concurrent release/refund calls can both pass the state check and both
-        # reach the provider, which is how a duplicate capture happens.
-        self._settle_lock = threading.RLock()
+        # Guards the transition into a terminal settlement state, *per job*. A
+        # single global lock would serialise every capture in the process: two
+        # unrelated jobs would take 2x one PayPal round-trip instead of running
+        # concurrently. The registry is keyed by job id so only attempts on the
+        # same job contend, which is the only contention that protects money.
+        self._locks: dict[str, threading.RLock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _job_lock(self, job_id: str) -> threading.RLock:
+        with self._locks_guard:
+            lock = self._locks.get(job_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._locks[job_id] = lock
+            return lock
+
+    def _release_job_lock(self, job_id: str) -> None:
+        """Drop a job's lock once it is terminal, so the registry cannot grow forever."""
+        with self._locks_guard:
+            self._locks.pop(job_id, None)
 
     @contextmanager
     def _guard(self, job: Job) -> Iterator[None]:
         """Serialise settlement for one job, across processes as well as threads.
 
-        ``_settle_lock`` only protects a single process. On a platform that runs
-        several instances, two of them can hold the same job and both capture. When
-        the store can take a shared claim (Postgres), hold it and adopt the stored
-        escrow state, so an attempt that already moved money is visible here as a
-        recorded capture rather than an open authorization.
+        The in-process lock is per job, so unrelated jobs settle concurrently. On
+        a platform that runs several instances, two of them can still hold the
+        same job and both capture, so when the store can take a shared claim
+        (Postgres) it is held too, and the stored escrow state is adopted so an
+        attempt that already moved money is visible here as a recorded capture
+        rather than an open authorization.
         """
         store = self.store
         if store is not None and getattr(store, "supports_claims", False):
@@ -239,10 +255,10 @@ class SettlementEngine:
                     # another instance then trips the "already captured" check below.
                     job.escrow = fresh.escrow
                     job.status = fresh.status
-                with self._settle_lock:
+                with self._job_lock(job.id):
                     yield
             return
-        with self._settle_lock:
+        with self._job_lock(job.id):
             yield
 
     def _persist(self, job: Job) -> None:
@@ -320,6 +336,10 @@ class SettlementEngine:
         job.escrow.order_id = order_id
         job.escrow.amount = amount
         job.escrow.mode = self.mode
+        # Record, at the source, whether this escrow is simulated. It is carried
+        # through every later transition so a mock capture can never be reported
+        # as a real payment, and a real one is never labelled simulated.
+        job.escrow.simulated = self.mode == "mock"
         url = approval_url(order) if isinstance(order, dict) else None
         job.escrow.approval_url = url or ""
         job.append(
@@ -329,6 +349,7 @@ class SettlementEngine:
             order_id=order_id,
             status=order.get("status"),
             mode=job.escrow.mode,
+            simulated=job.escrow.simulated,
         )
 
         if self.requires_buyer_approval:
@@ -519,6 +540,7 @@ class SettlementEngine:
                     score=self.reputation.score(record),
                 )
             self._persist(job)
+            self._release_job_lock(job.id)
             return job
 
     def refund(self, job: Job, reason: str = "") -> Job:
@@ -578,6 +600,7 @@ class SettlementEngine:
                     score=self.reputation.score(record),
                 )
             self._persist(job)
+            self._release_job_lock(job.id)
             return job
 
     def _confirm_void(self, authorization_id: str) -> bool:
@@ -588,6 +611,62 @@ class SettlementEngine:
             log.warning("Could not confirm void of %s: %s", authorization_id, exc)
             return False
         return str(current.status).upper() == "VOIDED"
+
+    # ----------------------------------------------------------- cancellation
+
+    def cancel(self, job: Job, reason: str = "") -> Job:
+        """Return a job to a safe, terminal state so it can be deleted.
+
+        This is the only route that lets a job with a financial history be
+        removed. It never discards a live authorization: an outstanding hold is
+        *voided* first, and the void is confirmed with the provider. If the
+        provider cannot be reached, or the hold has already moved money, the job
+        is left unresolved and deletion stays blocked — an outage is not evidence
+        that no money moved, so the record must not disappear.
+
+        Idempotent: cancelling a job already in a terminal state is a no-op that
+        reports success, so a retried cancel cannot void or refund twice.
+        """
+        with self._guard(job):
+            state = job.escrow.state
+
+            if state in TERMINAL_ESCROW_STATES:
+                # Nothing to unwind. Ensure a terminal status so deletion is allowed.
+                if job.status not in {JobStatus.VOIDED, JobStatus.FAILED, JobStatus.SETTLED}:
+                    job.status = JobStatus.VOIDED
+                    job.append("job_cancelled", "pact",
+                               reason or "Cancelled with no funds outstanding")
+                    self._persist(job)
+                return job
+
+            if state == EscrowState.HELD:
+                # Void the hold, then confirm. refund() already does exactly this,
+                # including the ambiguity handling that keeps the job unresolved
+                # rather than pretending the money came back.
+                try:
+                    return self.refund(job, reason=reason or "Job cancelled")
+                except PayPalError:
+                    # refund() has already recorded the failure / unresolved state.
+                    # Re-raise so the caller reports a failure instead of a cancel.
+                    raise
+
+            if state in {EscrowState.RELEASED, EscrowState.UNRESOLVED}:
+                # Money has moved or its fate is unknown. Cancelling must not
+                # pretend otherwise; the job needs reconciliation, not deletion.
+                raise ValueError(
+                    f"Cannot cancel a job whose escrow is {state.value}; "
+                    f"reconcile it first"
+                )
+
+            # NONE / AWAITING_APPROVAL: no funds held yet. Safe to close out.
+            job.escrow.state = EscrowState.VOIDED
+            job.status = JobStatus.VOIDED
+            job.append("job_cancelled", "pact",
+                       reason or "Cancelled before any funds were held",
+                       previous_state=state.value)
+            self._persist(job)
+            self._release_job_lock(job.id)
+            return job
 
     # ------------------------------------------------------- reconciliation
 

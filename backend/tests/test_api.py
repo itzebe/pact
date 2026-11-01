@@ -12,9 +12,15 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> TestClient:
-    """A client backed by a fresh store, with no LLM and no PayPal credentials."""
+    """A client backed by a fresh store, with no LLM and no PayPal credentials.
+
+    The client carries a signed *buyer* token by default, so the tests below read
+    as the ordinary buyer flow. Tests that need another role pass ``headers=``
+    explicitly, which replaces the default for that call.
+    """
     from pact import config
     from pact.api import routes
+    from pact.api.auth import issue_token
     from pact.core.engine import PactEngine
     from pact.core.llm import MockLLM
     from pact.core.store import JobStore, ReputationLedger
@@ -28,7 +34,15 @@ def client(tmp_path, monkeypatch) -> TestClient:
         reputation_ledger=ReputationLedger(tmp_path / "rep.json"),
     )
     monkeypatch.setattr(routes, "engine", engine)
-    return TestClient(app)
+    test_client = TestClient(app)
+    test_client.headers.update({"Authorization": f"Bearer {issue_token('buyer', 'buyer')}"})
+    return test_client
+
+
+def _admin_headers() -> dict[str, str]:
+    from pact.api.auth import issue_token
+
+    return {"Authorization": f"Bearer {issue_token('admin', 'admin')}"}
 
 
 BODY = {
@@ -158,7 +172,10 @@ def test_reputation_only_reflects_real_outcomes(client):
     job_id = create(client)
     client.post(f"/api/jobs/{job_id}/run")
     job = client.get(f"/api/jobs/{job_id}").json()
-    agents = {a["agent_id"]: a for a in client.get("/api/reputation").json()["agents"]}
+    agents = {
+        a["agent_id"]: a
+        for a in client.get("/api/reputation").json()["agents"]
+    }
 
     winner = agents[job["seller_id"]]
     if job["status"] == "settled":
@@ -218,7 +235,7 @@ def test_reconcile_is_refused_for_a_job_that_is_not_unresolved(client):
     job_id = create(client)
     assert client.post(f"/api/jobs/{job_id}/run").status_code == 200
 
-    response = client.post(f"/api/jobs/{job_id}/reconcile")
+    response = client.post(f"/api/jobs/{job_id}/reconcile", headers=_admin_headers())
     assert response.status_code == 409, response.text
     assert "unresolved" in response.json()["detail"]
 
@@ -260,7 +277,7 @@ def test_reconcile_resolves_a_job_whose_capture_outcome_was_lost(client):
     assert unresolved["status"] == "unresolved", unresolved
     assert unresolved["escrow"]["capture_id"] == "pending"
 
-    reconciled = client.post(f"/api/jobs/{job.id}/reconcile")
+    reconciled = client.post(f"/api/jobs/{job.id}/reconcile", headers=_admin_headers())
     assert reconciled.status_code == 200, reconciled.text
     result = reconciled.json()
     assert result["status"] == "settled", result
