@@ -731,3 +731,114 @@ def test_an_abandoned_approval_claim_expires_in_the_database(clean_db):
             (job.id,),
         )
     assert other.claim_approval(job, ttl_seconds=120) is True
+
+
+# --------------------------------------------------------------- refund race
+
+REFUND_RACE_SCRIPT = textwrap.dedent(
+    """
+    import os, sys, time
+    from decimal import Decimal
+
+    from pact.core.dbstore import PostgresJobStore, PostgresReputationLedger
+    from pact.core.engine import PactEngine
+    from pact.core.llm import MockLLM
+    from pact.paypal.mock import MockPayPalEscrowClient
+
+    dsn, job_id, log_path, start_at = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+
+    class SharedProvider(MockPayPalEscrowClient):
+        \"\"\"A provider double whose refund record lives on disk.
+
+        Each process builds its own object, so the only way to model a real
+        provider is out-of-process state. The exclusive-create marker stands in for
+        PayPal applying a refund once for a given idempotency key; a second,
+        *distinct* refund attempt would create a second marker and be recorded as a
+        duplicate.
+        \"\"\"
+
+        def refund_capture(self, capture_id, *, amount=None, currency=None, idempotency_key=None):
+            marker = log_path + "." + str(idempotency_key)
+            try:
+                fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+            except FileExistsError:
+                pass
+            with open(log_path, "a") as fh:
+                fh.write("refund " + str(idempotency_key) + "\\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            return {"id": "REF-SHARED", "status": "COMPLETED",
+                    "amount": {"currency_code": "USD", "value": str(amount)}}
+
+    store = PostgresJobStore(dsn)
+    ledger = PostgresReputationLedger(dsn)
+    job = store.get(job_id)
+    engine = PactEngine(llm=MockLLM(), escrow=SharedProvider(), store=store,
+                        reputation_ledger=ledger)
+
+    while time.time() < start_at:
+        time.sleep(0.005)
+
+    try:
+        engine.refund_job(job)
+        print("REFUNDED")
+    except Exception as exc:
+        print(f"REFUSED: {type(exc).__name__}: {exc}")
+    """
+)
+
+
+def test_two_processes_cannot_both_refund_a_capture(clean_db, tmp_path):
+    """Two OS processes race to refund one capture. The provider is hit once.
+
+    The capture guard and the refund guard are the same shared advisory lock, so a
+    refund recorded by the first process is visible to the second inside the lock
+    and the second sees a fully-refunded capture rather than issuing a second
+    provider refund.
+    """
+    from pact.core.models import EscrowState, JobStatus
+
+    store, ledger = clean_db
+    # One engine holds and releases, so the capture happens against the same mock
+    # that placed the authorization. The racing processes build their own provider
+    # doubles; the shared provider state is the on-disk marker.
+    engine = _engine(store, ledger)
+    job = engine.create_job(title="Refund race", brief="b", criteria=CRITERIA,
+                            budget_max=Decimal("100"))
+    job.seller_id = "seller_nova"
+    job.agreed_price = Decimal("120.00")
+    engine.settlement.hold(job)
+    # The shared claim re-reads the persisted row, so the hold must be written before
+    # the release, exactly as the engine does on the normal path.
+    store.save(job)
+    engine.settlement.release(job)
+    assert job.escrow.state is EscrowState.RELEASED
+    store.save(job)
+
+    log = tmp_path / "refund.log"
+    log.write_text("")
+    script = tmp_path / "refund_race.py"
+    script.write_text(REFUND_RACE_SCRIPT)
+
+    start_at = time.time() + 2.0
+    env = {**os.environ, "PYTHONPATH": str(BACKEND), "DATABASE_URL": DATABASE_URL}
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(script), DATABASE_URL, job.id, str(log), str(start_at)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        for _ in range(2)
+    ]
+    outs = [p.communicate(timeout=120)[0].strip() for p in procs]
+
+    lines = [ln for ln in log.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1, (
+        f"the provider must be refunded exactly once, got {lines}; output: {outs}"
+    )
+
+    final = store.get(job.id)
+    assert final.escrow.state is EscrowState.REFUNDED
+    assert final.status is JobStatus.REFUNDED
+    assert final.escrow.refunded_amount == Decimal("120.00")
+    assert final.verify_chain() is True

@@ -391,3 +391,76 @@ def test_money_formats_and_rejects_junk():
     assert money(3.005) == "3.01"
     with pytest.raises(ValueError):
         money("not-a-number")
+
+
+# ----------------------------------------------------- webhook signature verify
+#
+# The verification call is the only thing standing between an unauthenticated POST
+# and a money-state change, so its contract is pinned here: SUCCESS verifies, every
+# other answer and every failure mode refuses.
+
+def _signed_headers() -> dict[str, str]:
+    return {
+        "paypal-transmission-id": "txn-1",
+        "paypal-transmission-time": "2026-01-01T00:00:00Z",
+        "paypal-cert-url": "https://api.paypal.com/cert.pem",
+        "paypal-auth-algo": "SHA256withRSA",
+        "paypal-transmission-sig": "sig-abc",
+    }
+
+
+def test_a_webhook_verifies_only_when_paypal_says_success(transport):
+    transport.set("POST", "/v1/oauth2/token", 200, {"access_token": "T", "expires_in": 3200})
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox", webhook_id="WH-1")
+    transport.set("POST", "/v1/notifications/verify-webhook-signature", 200,
+                  {"verification_status": "SUCCESS"})
+    assert client.verify_webhook_signature(_signed_headers(), {"id": "e1"}) is True
+
+
+def test_a_failed_verification_status_is_refused(transport):
+    transport.set("POST", "/v1/oauth2/token", 200, {"access_token": "T", "expires_in": 3200})
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox", webhook_id="WH-1")
+    transport.set("POST", "/v1/notifications/verify-webhook-signature", 200,
+                  {"verification_status": "FAILURE"})
+    assert client.verify_webhook_signature(_signed_headers(), {"id": "e1"}) is False
+
+
+def test_missing_signature_headers_are_refused_without_a_call(transport):
+    transport.set("POST", "/v1/oauth2/token", 200, {"access_token": "T", "expires_in": 3200})
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox", webhook_id="WH-1")
+    # No signature headers at all: refused before any network call.
+    assert client.verify_webhook_signature({}, {"id": "e1"}) is False
+    assert not any(r.url.path == "/v1/notifications/verify-webhook-signature" for r in transport.requests)
+
+
+def test_a_webhook_without_a_configured_id_cannot_be_verified(transport):
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox", webhook_id="")
+    assert client.can_verify_webhooks is False
+    assert client.verify_webhook_signature(_signed_headers(), {"id": "e1"}) is False
+
+
+def test_a_verification_call_that_errors_fails_closed(transport):
+    transport.set("POST", "/v1/oauth2/token", 200, {"access_token": "T", "expires_in": 3200})
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox", webhook_id="WH-1")
+    # The verify endpoint itself returns a 5xx: cannot decide, so refuse.
+    transport.set("POST", "/v1/notifications/verify-webhook-signature", 500, {})
+    assert client.verify_webhook_signature(_signed_headers(), {"id": "e1"}) is False
+
+
+def test_the_verification_payload_carries_the_webhook_id_and_event(transport):
+    transport.set("POST", "/v1/oauth2/token", 200, {"access_token": "T", "expires_in": 3200})
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox", webhook_id="WH-42")
+    transport.set("POST", "/v1/notifications/verify-webhook-signature", 200,
+                  {"verification_status": "SUCCESS"})
+    client.verify_webhook_signature(_signed_headers(), {"id": "e1", "event_type": "X"})
+    sent = next(r for r in transport.requests if r.url.path == "/v1/notifications/verify-webhook-signature")
+    body = json.loads(sent.content)
+    assert body["webhook_id"] == "WH-42"
+    assert body["webhook_event"]["id"] == "e1"
+    assert body["transmission_sig"] == "sig-abc"
+
+
+def test_a_configured_base_url_override_is_honoured():
+    client = PayPalEscrowClient(client_id="cid", client_secret="s", environment="sandbox",
+                                base_url="http://127.0.0.1:9999/")
+    assert client.base_url == "http://127.0.0.1:9999"
