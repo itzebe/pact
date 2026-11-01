@@ -23,6 +23,8 @@ from ..core.engine import JobAlreadyRunning, RunDeadlineExceeded, ServerBusy, en
 from ..core.models import EscrowState, Job
 from ..core.negotiation import default_seller_ids
 from ..core.store import TERMINAL_ESCROW_STATES
+from ..core.webhooks import process_event
+from ..core.webhook_store import webhook_store
 from ..paypal import MockPayPalEscrowClient, PayPalError, approval_url
 from .auth import (
     STREAM_TICKET_TTL,
@@ -164,6 +166,13 @@ def health() -> dict[str, Any]:
             # Whether this process will move real money. False means the mock is
             # in use, and any settlement it reports is simulated.
             "settlement_is_real": settlement_real,
+            # Whether webhook signature verification is possible at all. False means
+            # no webhook can be trusted, so a signed event would be refused rather
+            # than applied. Never exposes the webhook id itself.
+            "webhook_verification": bool(
+                getattr(engine.escrow, "can_verify_webhooks", False)
+            ),
+            "sandbox_only": settings.paypal.sandbox_only,
         },
         "llm": {
             "configured": settings.llm.configured,
@@ -183,6 +192,71 @@ def health() -> dict[str, Any]:
         # mistaken for durable when it is not.
         "storage": storage,
     }
+
+
+# --------------------------------------------------------------------- webhooks
+
+@public_router.post("/paypal/webhook")
+async def paypal_webhook(request: Request) -> dict[str, Any]:
+    """Receive PayPal webhook events for this deployment.
+
+    Unauthenticated by necessity: PayPal cannot present a PACT bearer token. Trust
+    therefore comes entirely from the signature, which is verified against PayPal's
+    own verification endpoint before *any* state is touched. An event that cannot be
+    verified is refused and changes nothing, so an attacker who can POST here still
+    cannot move money.
+
+    Responses are chosen so PayPal's retry behaviour is correct:
+
+    * ``200`` with an outcome for an applied, duplicate, ignored or unknown-job
+      event. A duplicate must be 200 or PayPal would retry it forever.
+    * ``400`` for a malformed body — a retry cannot fix it.
+    * ``503`` when the signature cannot be verified because verification is
+      unavailable or the shared store is down, so PayPal retries later.
+
+    The raw body is read as bytes so a signature is computed over exactly what was
+    received, and it is never logged.
+    """
+    raw = await request.body()
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Malformed webhook body")
+
+    escrow = engine.escrow
+    if not getattr(escrow, "can_verify_webhooks", False):
+        # No webhook id or no credentials: nothing can be verified, so nothing may
+        # be applied. 503 asks PayPal to retry rather than dropping the event.
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook verification is not configured on this deployment",
+        )
+
+    # A shared event store that could not be opened cannot decide idempotency across
+    # instances. Applying the event anyway could double-apply on another instance, so
+    # refuse and let PayPal retry once the database is reachable.
+    if getattr(webhook_store, "backend", "") == "unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook event store is unavailable; refusing the event",
+        )
+
+    verified = await asyncio.to_thread(
+        escrow.verify_webhook_signature, dict(request.headers), payload
+    )
+    if not verified:
+        raise HTTPException(status_code=401, detail="Webhook signature verification failed")
+
+    outcome, _job = await asyncio.to_thread(
+        process_event,
+        payload=payload,
+        verified=True,
+        store=webhook_store,
+        get_job=engine.store.get,
+        save_job=engine.store.save,
+        job_guard=engine.settlement_guard,
+    )
+    return {"status": "ok", "outcome": outcome}
 
 
 def _visible_jobs(principal: Principal, limit: int) -> list[Job]:
@@ -390,6 +464,58 @@ async def reconcile_job(
         )
     reconciled = await asyncio.to_thread(engine.reconcile_job, job)
     return _job_full(reconciled)
+
+
+class RefundRequest(BaseModel):
+    """Body for a refund. Both fields optional: the default refunds the full capture."""
+
+    amount: float | None = Field(default=None, gt=0)
+    reason: str = Field(default="", max_length=300)
+
+
+@router.post("/jobs/{job_id}/refund")
+async def refund_job(
+    job_id: str,
+    principal: Annotated[Principal, Depends(require_buyer)],
+    body: RefundRequest | None = None,
+) -> dict[str, Any]:
+    """Refund a captured payment, in full or in part.
+
+    Refunding returns money PayPal has already captured from the seller, so it is
+    gated on the *owning buyer or an admin* (``require_buyer`` plus the ownership
+    check below), not merely a valid token: an arbitrary authenticated caller must not
+    be able to drain a settlement. The job must be in a ``released`` escrow — there is
+    nothing to refund before a capture.
+
+    The captured-amount cap and the per-operation idempotency key are enforced in the
+    settlement engine, so a repeated request cannot refund twice and an over-large
+    request is refused before PayPal is called. An ambiguous provider outcome returns
+    502 and leaves the job unresolved rather than reporting a refund that did not land.
+    """
+    job = _owned_job(principal, job_id)
+    if job.escrow.state not in {EscrowState.RELEASED, EscrowState.REFUNDED}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job has no captured payment to refund (escrow state {job.escrow.state.value})",
+        )
+    try:
+        refunded = await asyncio.to_thread(
+            engine.refund_job,
+            job,
+            amount=body.amount if body else None,
+            reason=body.reason if body else "",
+        )
+    except ValueError as exc:
+        # An over-large refund, a wrong state, or a bad amount is a conflict, not a 500.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PayPalError as exc:
+        # The provider could not be reached or refused the refund. The job has been left
+        # unresolved; the caller must not read this as a completed refund.
+        raise HTTPException(
+            status_code=502,
+            detail={"provider_error": exc.code or "PAYPAL_ERROR", "message": str(exc)[:300]},
+        ) from exc
+    return _job_full(refunded)
 
 
 _EMAIL = re.compile(r"([^@\s]{1,64})@([^@\s]+\.[A-Za-z]{2,})")
@@ -662,6 +788,8 @@ def _job_full(job: Job) -> dict[str, Any]:
                 "capture_id": job.escrow.capture_id,
                 "capture_status": job.escrow.capture_status,
                 "refund_id": job.escrow.refund_id,
+                "refund_status": job.escrow.refund_status,
+                "refunded_amount": float(job.escrow.refunded_amount),
                 "amount": float(job.escrow.amount),
                 "currency": job.escrow.currency,
             },

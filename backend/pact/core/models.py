@@ -107,6 +107,13 @@ class EscrowRecord(BaseModel):
     capture_id: str = ""
     capture_status: str = ""
     refund_id: str = ""
+    refund_status: str = ""
+    # Cumulative amount refunded against this capture. Partial refunds accumulate, so
+    # the sum can never exceed ``amount``; ``refund_sequence`` counts *confirmed*
+    # refund operations and is what makes each refund's idempotency key distinct
+    # while a retry of the same call reuses one.
+    refunded_amount: Decimal = Decimal("0")
+    refund_sequence: int = 0
     amount: Decimal = Decimal("0")
     currency: str = "USD"
     state: EscrowState = EscrowState.NONE

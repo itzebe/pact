@@ -22,6 +22,7 @@ import logging
 import threading
 import uuid
 from contextlib import contextmanager
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterator
 
 from ..paypal import EscrowBackend, PayPalError
@@ -149,6 +150,18 @@ class Verifier:
             criteria=deterministic + model_verification.criteria,
             summary=model_verification.summary,
         )
+
+
+def _to_decimal(value: Any) -> Decimal:
+    """Coerce an amount to a quantised ``Decimal``, refusing junk rather than guessing.
+
+    Money arithmetic must never round-trip through a float, and an unparseable amount
+    is a caller error, not something to silently treat as zero.
+    """
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid amount: {value!r}") from exc
 
 
 def _parse_verification(raw: dict, criteria: list[str]) -> Verification:
@@ -611,6 +624,138 @@ class SettlementEngine:
             log.warning("Could not confirm void of %s: %s", authorization_id, exc)
             return False
         return str(current.status).upper() == "VOIDED"
+
+    # ------------------------------------------------------------ refund
+
+    def refund_capture(self, job: Job, *, amount: Decimal | float | None = None,
+                       reason: str = "") -> Job:
+        """Reverse an already-captured payment (post-settlement dispute).
+
+        Distinct from :meth:`refund`, which *voids a hold* and moves no money. This one
+        returns money PayPal has already captured from the seller, so it is only
+        reachable from a ``RELEASED`` (or partially ``REFUNDED``) escrow and only up to
+        the captured amount.
+
+        Two properties are load-bearing:
+
+        * **The cap.** The sum of every confirmed refund can never exceed the captured
+          amount. A request beyond what remains is refused *before* the provider is
+          called, so a bug cannot send PayPal a refund it should not have.
+        * **Idempotency under retry.** The provider key is derived from a persisted
+          ``refund_sequence``, so a lost response is reconciled (by reading the capture)
+          rather than re-sent, and only a genuinely new refund advances the sequence. A
+          retry after a confirmed success is a no-op that returns the same refund id.
+
+        An ambiguous outcome leaves the job ``UNRESOLVED`` and the refund unrecorded; it
+        never reports a refund PayPal may not have applied.
+        """
+        requested = _to_decimal(amount) if amount is not None else _to_decimal(job.escrow.amount)
+
+        with self._guard(job):
+            if job.escrow.state not in {EscrowState.RELEASED, EscrowState.REFUNDED}:
+                raise ValueError(
+                    f"Cannot refund a capture in escrow state {job.escrow.state.value}"
+                )
+            if not job.escrow.capture_id or job.escrow.capture_id == IN_FLIGHT_CAPTURE:
+                raise ValueError("No captured payment to refund")
+            if requested <= 0:
+                raise ValueError("Refund amount must be positive")
+
+            # A capture already fully refunded is a no-op, so a repeated request returns
+            # the existing result instead of moving money a second time. This is checked
+            # before the cap so a retry after a full refund succeeds rather than being
+            # refused as an over-large request.
+            if _to_decimal(job.escrow.refunded_amount) >= _to_decimal(job.escrow.amount):
+                return job
+
+            remaining = _to_decimal(job.escrow.amount) - _to_decimal(job.escrow.refunded_amount)
+            if requested > remaining:
+                raise ValueError(
+                    f"Refund of {requested} exceeds the {remaining} still refundable on "
+                    f"capture {job.escrow.capture_id}"
+                )
+
+            # One key per refund *operation*: a retry of this call reuses the key and
+            # PayPal returns the same refund, while a later distinct refund gets a new
+            # key. The sequence only advances once a refund is confirmed.
+            idempotency_key = f"pact-refund-{job.id}-{job.escrow.refund_sequence + 1}"
+            try:
+                body = self.escrow.refund_capture(
+                    job.escrow.capture_id,
+                    amount=requested,
+                    currency=job.currency,
+                    idempotency_key=idempotency_key,
+                )
+            except PayPalError as exc:
+                job.append(
+                    "refund_failed",
+                    "paypal",
+                    f"Refund failed: {exc}",
+                    capture_id=job.escrow.capture_id,
+                    amount=float(requested),
+                )
+                if getattr(exc, "ambiguous", False):
+                    self.mark_unresolved(
+                        job,
+                        f"Refund outcome unknown; reconciliation required ({exc})",
+                    )
+                raise
+
+            status = str(body.get("status", "")).upper()
+            if status != "COMPLETED":
+                # PENDING or FAILED: the money has not moved. Do not record a refund that
+                # has not landed; stop for reconciliation.
+                job.escrow.refund_status = status or "UNKNOWN"
+                job.append(
+                    "refund_not_completed",
+                    "paypal",
+                    f"Refund reported {status or 'an unknown status'}; no refund recorded",
+                    capture_id=job.escrow.capture_id,
+                    amount=float(requested),
+                )
+                self.mark_unresolved(job, f"Refund is {status or 'not confirmed'}")
+                return job
+
+            refund_id = str(body.get("id", ""))
+            job.escrow.refund_id = refund_id
+            job.escrow.refund_status = status
+            job.escrow.refunded_amount = _to_decimal(job.escrow.refunded_amount) + requested
+            job.escrow.refund_sequence += 1
+
+            fully_refunded = (
+                _to_decimal(job.escrow.refunded_amount) >= _to_decimal(job.escrow.amount)
+            )
+            if fully_refunded:
+                job.escrow.state = EscrowState.REFUNDED
+                job.status = JobStatus.REFUNDED
+            job.append(
+                "escrow_refunded",
+                "paypal",
+                f"Refund {refund_id} completed for {job.currency} {requested}"
+                + ("" if fully_refunded else " (partial)"),
+                refund_id=refund_id,
+                capture_id=job.escrow.capture_id,
+                status=status,
+                amount=float(requested),
+                refunded_total=float(job.escrow.refunded_amount),
+                partial=not fully_refunded,
+                reason=reason,
+                mode=job.escrow.mode,
+            )
+            if fully_refunded and job.seller_id:
+                record = self.reputation.record_voided(job.seller_id)
+                job.append(
+                    "reputation_updated",
+                    "pact",
+                    f"{job.seller_id} score now {self.reputation.score(record):.3f} "
+                    f"({record['voided']} voided)",
+                    agent_id=job.seller_id,
+                    score=self.reputation.score(record),
+                )
+            self._persist(job)
+            if fully_refunded:
+                self._release_job_lock(job.id)
+            return job
 
     # ----------------------------------------------------------- cancellation
 

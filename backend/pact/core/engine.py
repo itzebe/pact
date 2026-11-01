@@ -85,6 +85,15 @@ class PactEngine:
     def settlement_mode(self) -> str:
         return self.settlement.mode
 
+    def settlement_guard(self, job: Job):
+        """The per-job settlement guard, so a webhook can serialise against a capture.
+
+        A webhook that settles a capture and a ``release`` call that captures are the
+        same money transition reached two ways. Running the webhook's apply inside
+        this guard means they cannot both read ``HELD`` and both record a release.
+        """
+        return self.settlement._guard(job)
+
     def create_job(self, *, title: str, brief: str, criteria: list[str], budget_max: Decimal,
                    buyer_id: str = "buyer", currency: str | None = None) -> Job:
         job = Job(
@@ -410,6 +419,15 @@ class PactEngine:
         first, never deleted out from under a live authorization.
         """
         return self.settlement.cancel(job, reason=reason)
+
+    def refund_job(self, job: Job, *, amount: float | None = None, reason: str = "") -> Job:
+        """Refund a captured payment (post-settlement dispute).
+
+        Delegates to the settlement engine, which enforces the captured-amount cap and
+        the per-operation idempotency key, and leaves the job ``UNRESOLVED`` rather than
+        reporting a refund PayPal did not confirm.
+        """
+        return self.settlement.refund_capture(job, amount=amount, reason=reason)
 
 
 engine = PactEngine()
