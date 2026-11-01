@@ -65,10 +65,13 @@ reusable credential.
 A ticket is also **single-use**, and that is decided in the shared database rather
 than in the process that minted it. A replay that lands on another instance — the
 normal case behind a load balancer — finds the ticket already consumed and is
-refused. Where no `DATABASE_URL` is configured the registry is process-local,
-which is correct only because such a deployment is single-instance by
-construction. If a shared store is configured but unreachable, every ticket is
-refused rather than accepted by a local fallback no other instance can see.
+refused. In production a shared database is mandatory: startup refuses to run
+without `DATABASE_URL`, so a multi-instance deployment cannot silently fall back to
+a process-local registry. In development, where no `DATABASE_URL` is configured, the
+registry is process-local, which is correct only because such a deployment is
+single-instance by construction. If a shared store is configured but unreachable,
+every ticket is refused rather than accepted by a local fallback no other instance
+can see.
 
 ## Threat model
 

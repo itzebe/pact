@@ -182,3 +182,154 @@ print(json.dumps({"storage": body["storage"], "status": body["status"]}))
     assert out["storage"]["settlement_disabled"] is True
     assert out["status"] == "degraded"
     assert out["storage"]["error"], "the cause must be reported, not hidden"
+
+
+# ------------------------- production must not silently lose shared guarantees
+#
+# A production deployment with no DATABASE_URL loses two instance-safety
+# guarantees at once: the consumed-SSE-ticket registry becomes process-local (a
+# replay landing on another instance is accepted) and the ledger becomes a
+# non-durable local file (lost on cold start, invisible to other instances). Both
+# are silent — the deployment looks healthy. These tests pin the enforcement that
+# turns each into a hard, visible failure, and confirm local development is
+# unaffected.
+
+
+def _run_startup(env_extra: dict[str, str]) -> dict:
+    """Import the app in a fresh interpreter and run its startup hook.
+
+    Startup runs at import-adjacent time and depends on import-time store
+    selection, so it can only be observed from a separate process.
+    """
+    import os
+
+    code = """
+import asyncio, json
+from pact.main import announce_configuration
+from pact.config import settings
+from pact.core.store import job_store
+from pact.core.ticket_store import ticket_store
+out = {
+    "is_production": settings.is_production,
+    "problems": settings.validate_runtime(),
+    "ticket_backend": ticket_store.backend,
+    "ticket_shared": ticket_store.shared,
+    "job_backend": job_store.backend,
+    "job_durable": job_store.durable,
+}
+try:
+    asyncio.run(announce_configuration())
+    out["started"] = True
+    out["error"] = None
+except Exception as exc:  # the refusal we are asserting on
+    out["started"] = False
+    out["error"] = str(exc)
+print("JSON:" + json.dumps(out))
+"""
+    env = {k: v for k, v in os.environ.items()
+           if k not in {"DATABASE_URL", "PACT_DATA_DIR", "PACT_ENV", "PACT_REQUIRE_REAL_PAYPAL",
+                        "PACT_ALLOW_MOCK_PAYPAL", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
+                        "LLM_API_KEY"}}
+    env["PYTHONPATH"] = str(BACKEND)
+    env.update(env_extra)
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, f"snippet crashed:\n{result.stdout}\n{result.stderr}"
+    line = next(ln for ln in result.stdout.splitlines() if ln.startswith("JSON:"))
+    return json.loads(line[len("JSON:"):])
+
+
+# A sound production base: real auth, real PayPal, mock explicitly off. Each test
+# overrides only the one variable it is about, so a failure cannot be blamed on an
+# unrelated missing setting.
+_PROD_BASE = {
+    "PACT_ENV": "production",
+    "PACT_AUTH_SECRET": "a-sufficiently-long-random-secret-value",
+    "PAYPAL_CLIENT_ID": "sandbox-id",
+    "PAYPAL_CLIENT_SECRET": "sandbox-secret",
+    "PAYPAL_ENVIRONMENT": "sandbox",
+    "PACT_ALLOW_MOCK_PAYPAL": "false",
+}
+
+
+def test_production_without_database_url_is_refused(tmp_path):
+    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data")})
+    assert out["is_production"] is True
+    assert any("DATABASE_URL" in p for p in out["problems"]), out["problems"]
+    assert out["started"] is False, "production must refuse to start without a database"
+    assert "DATABASE_URL" in out["error"]
+    # No local fallback is ever served: the process never starts with one.
+    assert out["ticket_shared"] is False, "sanity: no DSN really does mean a local registry"
+
+
+def test_production_with_empty_database_url_is_refused(tmp_path):
+    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data"), "DATABASE_URL": ""})
+    assert any("DATABASE_URL" in p for p in out["problems"]), out["problems"]
+    assert out["started"] is False
+
+
+def test_production_with_whitespace_database_url_is_refused(tmp_path):
+    """An empty-looking value is not a configured database."""
+    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data"), "DATABASE_URL": "   "})
+    assert any("DATABASE_URL" in p for p in out["problems"]), out["problems"]
+    assert out["started"] is False
+
+
+def test_development_without_database_url_still_starts(tmp_path):
+    """Local development, which has no Postgres, must keep working."""
+    out = _run_startup({
+        "PACT_ENV": "development",
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "PACT_ALLOW_MOCK_PAYPAL": "true",
+    })
+    assert out["is_production"] is False
+    assert out["started"] is True, out["error"]
+    assert out["job_backend"] == "filesystem"
+    assert out["ticket_backend"] == "memory", "development may use the process-local registry"
+
+
+def test_production_with_unavailable_postgresql_is_refused(tmp_path):
+    """A configured-but-unreachable database must fail closed at startup."""
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "DATABASE_URL": "postgresql://nobody@127.0.0.1:1/nope",
+    })
+    # The DSN is present, so config validation passes; the failure is the store.
+    assert out["problems"] == [], out["problems"]
+    assert out["ticket_backend"] == "unavailable"
+    assert out["started"] is False, "an unreachable production database must refuse to boot"
+    assert "DATABASE_URL" in out["error"]
+    # The refusal message must never echo credentials.
+    assert "nobody" not in out["error"]
+
+
+def test_production_never_falls_back_to_local_ticket_storage(tmp_path):
+    """With no DSN, production is refused rather than served a local registry."""
+    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data")})
+    # If it had started, ticket storage would have been process-local. It did not.
+    assert not (out["started"] and out["ticket_backend"] == "memory")
+
+
+def test_production_never_falls_back_to_non_durable_ledger(tmp_path):
+    """With no DSN, production is refused rather than served a local ledger."""
+    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data")})
+    assert not (out["started"] and out["job_backend"] == "filesystem" and out["job_durable"])
+
+
+def test_production_with_valid_postgresql_starts(tmp_path):
+    """With a reachable database the deployment starts and the store is shared."""
+    import os
+
+    dsn = os.getenv("DATABASE_URL", "")
+    if not dsn:
+        pytest.skip("DATABASE_URL not set; the valid-Postgres startup test is opt-in")
+    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data"), "DATABASE_URL": dsn})
+    assert out["problems"] == [], out["problems"]
+    assert out["started"] is True, out["error"]
+    assert out["ticket_backend"] == "postgres"
+    assert out["ticket_shared"] is True
+    assert out["job_backend"] == "postgres"
+    assert out["job_durable"] is True
+
