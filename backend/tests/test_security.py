@@ -548,8 +548,37 @@ def test_runtime_validation_is_quiet_for_a_sound_production_deployment():
         environment="production",
         allow_mock_paypal=False,
         paypal=dataclasses.replace(settings.paypal, client_id="id", client_secret="secret"),
+        database_url="postgresql://user:pw@db.internal:5432/pact",
     )
     assert sound.validate_runtime() == []
+
+
+def test_runtime_validation_flags_a_production_deployment_without_a_database():
+    """A production deployment with no shared database loses instance safety silently."""
+    import dataclasses
+
+    from pact.config import AuthSettings, Settings
+
+    broken = Settings(
+        auth=AuthSettings(secret="a-sufficiently-long-random-secret-value"),
+        environment="production",
+        allow_mock_paypal=False,
+        paypal=dataclasses.replace(settings.paypal, client_id="id", client_secret="secret"),
+        database_url="",
+    )
+    assert any("DATABASE_URL" in p for p in broken.validate_runtime())
+
+
+def test_runtime_validation_allows_development_without_a_database():
+    from pact.config import AuthSettings, Settings
+
+    dev = Settings(
+        auth=AuthSettings(secret="dev-secret-value-long-enough"),
+        environment="development",
+        allow_mock_paypal=True,
+        database_url="",
+    )
+    assert dev.validate_runtime() == []
 
 
 def test_runtime_validation_rejects_a_relative_public_url():

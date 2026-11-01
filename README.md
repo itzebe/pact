@@ -314,20 +314,24 @@ See [`docs/AUTH.md`](docs/AUTH.md) for the role model and the threat it addresse
 Vercel Functions have a read-only filesystem with ephemeral `/tmp`, and several
 instances may serve the same job. Two things follow, and both are handled:
 
-- **Persistence must be external.** Set `DATABASE_URL` to a Postgres URL
-  (Vercel Postgres, Neon, Supabase, and so on). Jobs and the reputation ledger
-  then live in the database. Without it the app still runs, but `/api/health`
-  reports `"durable": false` and the ledger is lost on cold start.
+- **Persistence must be external, and in production it is enforced.** Set
+  `DATABASE_URL` to a Postgres URL (Vercel Postgres, Neon, Supabase, and so on).
+  Jobs and the reputation ledger then live in the database. Production startup
+  refuses to run when `DATABASE_URL` is unset or empty, so a multi-instance
+  deployment cannot silently fall back to a non-durable local ledger. In
+  development the app still runs without it, but `/api/health` reports
+  `"durable": false` and the ledger is lost on cold start.
 - **Settlement must be instance-safe.** On Postgres the store takes a session
   advisory lock per job and re-reads the authoritative row inside it, so two
   instances cannot both capture the same authorization. The filesystem store
   cannot do this; its `threading.RLock` only protects one process.
 - **Single-use state must be shared too.** The consumed-SSE-ticket registry also
   moves into Postgres, so a captured stream URL cannot be replayed against a
-  different instance. With `DATABASE_URL` unset the registry is process-local,
-  which is only correct for a single-instance deployment; if the database is
-  configured but unreachable, stream tickets are refused rather than accepted
-  locally.
+  different instance. In production `DATABASE_URL` is required, so the registry is
+  always shared; in development it may be unset, and the registry is then
+  process-local, which is only correct for a single-instance deployment. If the
+  database is configured but unreachable, stream tickets are refused rather than
+  accepted locally.
 
 The repository is already configured — `vercel.json` builds the frontend and
 routes `/api/*` to the FastAPI function in `api/index.py`.

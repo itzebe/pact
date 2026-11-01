@@ -21,6 +21,7 @@ from starlette.types import Scope
 from . import __version__
 from .api.routes import public_router, router, stream_router
 from .config import settings
+from .core.ticket_store import ticket_store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -177,6 +178,19 @@ async def announce_configuration() -> None:
                 "Refusing to start in production with an unsafe configuration: "
                 + "; ".join(problems)
             )
+    # A production deployment whose shared ticket store could not be opened would
+    # otherwise serve with a process-local registry, where a ticket consumed by one
+    # instance is replayable against another. The store itself already refuses every
+    # ticket in that state (fail closed); refusing to boot makes the misconfiguration
+    # impossible to miss instead of merely safe. Reaching this point means a
+    # DATABASE_URL was configured (its absence is caught above), so only the failure
+    # classification — never the connection string — would be reported.
+    if settings.is_production and ticket_store.backend == "unavailable":
+        raise RuntimeError(
+            "Refusing to start in production: the configured PostgreSQL store could "
+            "not be opened, so single-use SSE tickets would not be enforced across "
+            "instances. Check that DATABASE_URL points at a reachable database."
+        )
     logging.getLogger("pact").info(
         "PayPal: %s (%s) | LLM: %s | auth: %s | env: %s | currency: %s | UI: %s",
         "configured" if settings.paypal.configured else "mock escrow",

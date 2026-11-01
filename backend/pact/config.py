@@ -172,6 +172,18 @@ class Settings:
                 problems.append(
                     "PACT_AUTH_SECRET is too short; use at least 32 random characters"
                 )
+            if not self.database_url.strip():
+                # A production deployment without a shared database silently loses two
+                # guarantees: SSE stream tickets fall back to a process-local registry
+                # (so a ticket consumed by one instance is replayable against another),
+                # and the job/reputation ledger falls back to non-durable local files
+                # that no other instance can see and that vanish on a cold start. The
+                # value is never echoed here — only its absence is reported.
+                problems.append(
+                    "DATABASE_URL is not set, so this production deployment would fall "
+                    "back to process-local ticket storage and a non-durable local "
+                    "ledger; set it to a PostgreSQL connection string"
+                )
         if self.auth.configured and self.auth.algorithm not in ALLOWED_AUTH_ALGORITHMS:
             problems.append(
                 f"PACT_AUTH_ALGORITHM {self.auth.algorithm!r} is not one of "
