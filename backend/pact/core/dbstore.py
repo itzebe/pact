@@ -123,11 +123,10 @@ class PostgresJobStore:
         self.dsn = dsn
         from .pool import get_pool
 
-        # The direct endpoint for the session-scoped settlement lock: the configured
-        # unpooled DSN when set, otherwise this store's own DSN (a plain PostgreSQL,
-        # as in development and the test suite, where the two are the same).
-        direct_dsn = settings.database_url_unpooled.strip() or dsn
-        self._pool = get_pool(dsn, direct_dsn=direct_dsn)
+        # The direct endpoint for the session-scoped settlement lock is resolved by
+        # the pool: an explicit DATABASE_URL_UNPOOLED for this deployment, or a
+        # derived Neon-style host, probe-verified before any lock is taken.
+        self._pool = get_pool(dsn)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(SCHEMA)
             for statement in MIGRATIONS:

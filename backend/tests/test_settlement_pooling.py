@@ -34,6 +34,7 @@ Run locally with:
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import sys
 import textwrap
@@ -45,6 +46,12 @@ import pytest
 
 DIRECT_URL = os.getenv("DATABASE_URL", "")
 POOLED_URL = os.getenv("PGBOUNCER_URL", "")
+
+
+def _probe_key() -> int:
+    """A unique advisory-lock key, so a killed run can never collide with a rerun."""
+    return random.getrandbits(62)
+
 
 pytestmark = pytest.mark.skipif(
     not DIRECT_URL, reason="DATABASE_URL not set; these tests need a PostgreSQL"
@@ -125,6 +132,26 @@ def test_a_pooler_host_is_refused_without_opening_a_connection():
     assert _direct_endpoint_refusal("postgresql://u:p@ep-x.c-1.us-east-2.aws.neon.tech/pact") is None
 
 
+def test_the_direct_endpoint_is_derived_from_a_neon_style_pooled_host():
+    """The direct host is the pooled host with the ``-pooler`` label removed.
+
+    This is the edit Neon documents, and it is what lets production (a Neon pooled
+    endpoint with no ``DATABASE_URL_UNPOOLED``) keep its settlement guard without an
+    extra variable.
+    """
+    from pact.core.pool import derive_direct_dsn
+
+    assert derive_direct_dsn(
+        "postgresql://user:pw@ep-x-pooler.c-1.us-east-2.aws.neon.tech/pact?sslmode=require"
+    ) == "postgresql://user:pw@ep-x.c-1.us-east-2.aws.neon.tech/pact?sslmode=require"
+    # A DSN with no pooler label has nothing to derive.
+    assert derive_direct_dsn("postgresql://user:pw@db.internal:5432/pact") is None
+    # A password containing the label must not be mangled; only the host is edited.
+    assert derive_direct_dsn(
+        "postgresql://user:p-pooler-w@ep-x-pooler.c-1.us-east-2.aws.neon.tech/pact"
+    ) == "postgresql://user:p-pooler-w@ep-x.c-1.us-east-2.aws.neon.tech/pact"
+
+
 def test_the_session_lock_is_held_across_the_whole_lifecycle():
     """A lock taken on the direct endpoint excludes a second direct connection.
 
@@ -134,7 +161,7 @@ def test_the_session_lock_is_held_across_the_whole_lifecycle():
     from pact.core.pool import DatabasePool
 
     pool = DatabasePool(DIRECT_URL, direct_dsn=DIRECT_URL, max_size=2)
-    key = 0x50414301
+    key = _probe_key()
     try:
         with pool.direct() as holder:
             with holder.cursor() as cur:
@@ -164,7 +191,7 @@ def test_backend_pid_is_stable_across_the_lock_lifecycle():
     from pact.core.pool import DatabasePool
 
     pool = DatabasePool(DIRECT_URL, direct_dsn=DIRECT_URL, max_size=2)
-    key = 0x50414302
+    key = _probe_key()
     try:
         with pool.direct() as conn:
             with conn.cursor() as cur:
@@ -186,7 +213,7 @@ def test_an_exception_inside_the_lock_releases_it():
     from pact.core.pool import DatabasePool
 
     pool = DatabasePool(DIRECT_URL, direct_dsn=DIRECT_URL, max_size=2)
-    key = 0x50414303
+    key = _probe_key()
     try:
         with pytest.raises(ValueError):
             with pool.direct() as conn:
@@ -207,7 +234,7 @@ def test_a_failed_direct_connect_does_not_strand_a_lock():
     from pact.core.pool import DatabasePool
 
     pool = DatabasePool(DIRECT_URL, direct_dsn=DIRECT_URL, max_size=2)
-    key = 0x50414304
+    key = _probe_key()
     try:
         # Simulate a connection that dies mid-operation: close it under the context.
         with pytest.raises(Exception):
@@ -400,7 +427,7 @@ def test_the_pooled_endpoint_cannot_hold_a_session_lock():
     """
     import psycopg
 
-    key = 0x50414305
+    key = _probe_key()
     first = psycopg.connect(POOLED_URL, autocommit=True)
     try:
         with first.cursor() as cur:

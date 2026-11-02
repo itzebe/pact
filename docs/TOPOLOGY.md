@@ -95,19 +95,22 @@ server connection for the block, so a multi-statement operation is not split acr
 backends.
 
 `PostgresJobStore.settlement_claim` holds a **session** advisory lock for the whole
-protected operation, so it uses `pool.direct()`: a dedicated connection to
-`DATABASE_URL_UNPOOLED` that is closed (not returned) on exit. Neither the
-application pool nor a transaction-mode pooler may be used there. A transaction-mode
-pooler hands the server connection back after every transaction, so a session lock
-taken through it is released between statements and a second instance can take it
-while the first still believes it holds it — the settlement guard silently stops
-guarding, and a duplicate PayPal capture becomes reachable. `pool.direct()` therefore
-**refuses** an endpoint that looks like a pooler (a `-pooler` host) or behaves like
-one (a live probe shows a second connection can take the same session lock), and
-fails loudly instead of degrading. `backend/tests/test_settlement_pooling.py` proves
-this: it runs the four-process settlement race with a transaction-mode PgBouncer as
-the application DSN, and includes a negative control showing the pooled endpoint
-really does lose the lock.
+protected operation, so it uses `pool.direct()`: a dedicated connection to a direct
+endpoint that is closed (not returned) on exit. The endpoint is
+`DATABASE_URL_UNPOOLED` when set; otherwise, if `DATABASE_URL` is a Neon-style
+`-pooler` host, the direct host is derived from it (the pooled host with `-pooler`
+removed — the same edit Neon documents), so production keeps its guard without an
+extra variable. Neither the application pool nor a transaction-mode pooler may be
+used there. A transaction-mode pooler hands the server connection back after every
+transaction, so a session lock taken through it is released between statements and a
+second instance can take it while the first still believes it holds it — the
+settlement guard silently stops guarding, and a duplicate PayPal capture becomes
+reachable. `pool.direct()` therefore **refuses** an endpoint that looks like a pooler
+(a `-pooler` host) or behaves like one (a live probe shows a second connection can
+take the same session lock), and fails loudly instead of degrading.
+`backend/tests/test_settlement_pooling.py` proves this: it runs the four-process
+settlement race with a transaction-mode PgBouncer as the application DSN, and includes
+a negative control showing the pooled endpoint really does lose the lock.
 
 ## Is ticket consumption atomic across instances?
 

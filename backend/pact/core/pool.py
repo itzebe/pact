@@ -108,6 +108,52 @@ def _direct_endpoint_refusal(dsn: str) -> str | None:
     return None
 
 
+def derive_direct_dsn(dsn: str) -> str | None:
+    """Best-effort direct (unpooled) DSN for a Neon-style pooled host.
+
+    Neon documents that the direct endpoint is the pooled hostname with the
+    ``-pooler`` label removed — the Console's "Connection pooling" toggle only
+    switches which of the two strings it displays, and Neon recommends editing the
+    suffix by hand. So when the configured DSN carries that label, the direct
+    endpoint can be derived without a second variable. The derived endpoint is
+    still checked by :func:`_probe_direct_session` before a session lock is taken,
+    so a wrong guess is refused rather than used.
+
+    Returns ``None`` when the DSN has no ``-pooler`` label to remove.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(dsn)
+    host = parts.hostname or ""
+    if "-pooler" not in host:
+        return None
+    direct_host = host.replace("-pooler", "")
+    netloc = direct_host
+    if parts.username is not None:
+        userinfo = parts.username
+        if parts.password is not None:
+            userinfo += ":" + parts.password
+        netloc = f"{userinfo}@{direct_host}"
+    if parts.port is not None:
+        netloc += f":{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def _default_direct_dsn(dsn: str) -> str:
+    """Resolve the direct endpoint for ``dsn`` when none was passed explicitly.
+
+    An explicit ``DATABASE_URL_UNPOOLED`` wins for the deployment's own DSN; for any
+    other DSN (a test fixture, say) the direct endpoint is derived from the DSN
+    itself. Falls back to ``dsn`` so a plain PostgreSQL needs nothing extra.
+    """
+    from ..config import settings
+
+    configured = settings.database_url_unpooled.strip()
+    if configured and settings.database_url.strip() == dsn.strip():
+        return configured
+    return derive_direct_dsn(dsn) or dsn
+
+
 def _probe_direct_session(dsn: str) -> str | None:
     """Live check that two connections to ``dsn`` are distinct server sessions.
 
@@ -199,11 +245,12 @@ class DatabasePool:
     ) -> None:
         ConnectionPool = _driver_pool()
         self.dsn = dsn
-        # The direct endpoint for session-scoped work. Defaults to the pooled DSN so
-        # a plain PostgreSQL (development, the test suite) needs no second variable;
-        # a deployment behind a pooler sets DATABASE_URL_UNPOOLED and gets a real
-        # session there.
-        self.direct_dsn = (direct_dsn or dsn).strip() or dsn
+        # The direct endpoint for session-scoped work. When none is passed, resolve
+        # one: an explicit DATABASE_URL_UNPOOLED for the deployment's own DSN, or a
+        # derived Neon-style host for anything else. Falls back to the pooled DSN so
+        # a plain PostgreSQL (development, the test suite) needs nothing extra; a
+        # pooled endpoint that survives to here is caught by direct()'s live probe.
+        self.direct_dsn = (direct_dsn or _default_direct_dsn(dsn)).strip() or dsn
         self.max_size = max(1, int(max_size))
         self.statement_timeout_ms = max(0, int(statement_timeout_ms))
 

@@ -296,9 +296,8 @@ def test_production_with_unavailable_postgresql_is_refused(tmp_path):
         **_PROD_BASE,
         "PACT_DATA_DIR": str(tmp_path / "data"),
         "DATABASE_URL": "postgresql://nobody@127.0.0.1:1/nope",
-        "DATABASE_URL_UNPOOLED": "postgresql://nobody@127.0.0.1:1/nope",
     })
-    # The DSNs are present, so config validation passes; the failure is the store.
+    # The DSN is present, so config validation passes; the failure is the store.
     assert out["problems"] == [], out["problems"]
     assert out["ticket_backend"] == "unavailable"
     assert out["started"] is False, "an unreachable production database must refuse to boot"
@@ -331,7 +330,6 @@ def test_production_with_valid_postgresql_starts(tmp_path):
         **_PROD_BASE,
         "PACT_DATA_DIR": str(tmp_path / "data"),
         "DATABASE_URL": dsn,
-        "DATABASE_URL_UNPOOLED": dsn,
     })
     assert out["problems"] == [], out["problems"]
     assert out["started"] is True, out["error"]
@@ -341,15 +339,17 @@ def test_production_with_valid_postgresql_starts(tmp_path):
     assert out["job_durable"] is True
 
 
-def test_production_without_an_unpooled_dsn_is_refused(tmp_path):
-    """A pooled DSN alone must not boot: session settlement locks would be unsafe."""
+def test_production_with_a_neon_style_pooled_dsn_is_accepted(tmp_path):
+    """A Neon ``-pooler`` host must boot: the direct endpoint is derived, not required.
+
+    Production is a Neon pooled endpoint and has no ``DATABASE_URL_UNPOOLED``. Neon
+    documents the direct endpoint as the pooled host with ``-pooler`` removed, so the
+    deployment must not be refused for lacking the variable.
+    """
     out = _run_startup({
         **_PROD_BASE,
         "PACT_DATA_DIR": str(tmp_path / "data"),
-        "DATABASE_URL": "postgresql://user:pw@db-pooler.internal:5432/pact",
+        "DATABASE_URL": "postgresql://user:pw@ep-x-pooler.c-1.us-east-2.aws.neon.tech/pact",
     })
-    assert any("DATABASE_URL_UNPOOLED" in p for p in out["problems"]), out["problems"]
-    assert out["started"] is False, "a pooled DSN alone must not start in production"
-    # The refusal never echoes the connection string or its credentials.
-    assert "user" not in out["error"] and "pw" not in out["error"]
+    assert out["problems"] == [], out["problems"]
 
