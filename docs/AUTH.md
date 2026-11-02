@@ -167,6 +167,7 @@ can see.
 | A public registration creating an administrator | The register schema accepts only `buyer`/`seller`, re-checked against an allow-list server-side. |
 | A money route being driven by an unverified or suspended customer | `require_verified` refuses with 403, and fails closed (503) if the shared account store is unreachable. |
 | A duplicated verification/reset email | A unique idempotency key per outbox message makes a duplicate enqueue a no-op. |
+| An email bomb to one mailbox via repeated resend/reset | Outbound verification and reset messages are capped per address (5 per hour); the cap is checked before a message is queued, and every send still uses a fresh idempotency key so a legitimate resend inside the cap is never blocked. |
 
 ## What this does not cover
 

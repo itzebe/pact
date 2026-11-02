@@ -222,3 +222,41 @@ def test_password_hashing_roundtrip_and_pepper(monkeypatch):
 def test_short_passwords_are_refused(svc):
     with pytest.raises(AuthError):
         svc.register(email="short@example.com", password="tiny", role="buyer")
+
+
+def test_outbound_email_is_bounded_per_address(svc, store):
+    """Repeated resets cannot queue unbounded messages to one mailbox.
+
+    Every send uses a fresh idempotency key (so a legitimate resend is never
+    blocked by a stale one), which means only a per-address cap stops an email
+    bomb. The cap is enforced before the message is queued.
+    """
+    from pact.core.accounts import OUTBOUND_EMAIL_LIMIT
+
+    svc.register(email="bomb@example.com", password="correct-horse-battery", role="buyer")
+    user = store.get_user_by_email("bomb@example.com")
+    # Registration itself queues one verification message and consumes one slot.
+    baseline = _outbox_count(store)
+    assert baseline == 1
+
+    queued = []
+    for _ in range(OUTBOUND_EMAIL_LIMIT + 5):
+        before = _outbox_count(store)
+        svc._queue_reset(user, ip_hash=None)
+        queued.append(_outbox_count(store) - before)
+
+    # The address may receive at most OUTBOUND_EMAIL_LIMIT messages in the window,
+    # so at most that many minus the verification already queued get through.
+    assert sum(queued) == OUTBOUND_EMAIL_LIMIT - 1, queued
+    assert all(n == 1 for n in queued[: OUTBOUND_EMAIL_LIMIT - 1])
+    assert all(n == 0 for n in queued[OUTBOUND_EMAIL_LIMIT - 1:]), queued
+
+
+def _outbox_count(store) -> int:
+    if DATABASE_URL:
+        import psycopg
+
+        with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM email_outbox")
+            return cur.fetchone()[0]
+    return len(store._outbox)

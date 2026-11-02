@@ -56,6 +56,12 @@ LOGIN_FAILURE_LIMIT = 8
 LOGIN_FAILURE_WINDOW_SECONDS = 900
 #: Minimum seconds between resends to the same address (email-bomb defence).
 RESEND_MIN_INTERVAL_SECONDS = 60
+#: Outbound verification/reset messages allowed per address within the window.
+#: Bounds an email bomb: every send uses a fresh idempotency key (so a legitimate
+#: resend is never blocked by a stale one), which means only a per-address cap
+#: stops a caller from queueing an unbounded number of messages to one mailbox.
+OUTBOUND_EMAIL_LIMIT = 5
+OUTBOUND_EMAIL_WINDOW_SECONDS = 3600
 
 #: Uniform messages. Registration and reset never differ by whether the address
 #: exists; only the mailbox owner can tell that a message arrived.
@@ -338,7 +344,30 @@ class AccountsService:
         path = "/verify-email" if kind == "verify" else "/reset-password"
         return f"{base}{path}?token={raw_token}"
 
+    def _outbound_email_allowed(self, user: UserRecord) -> bool:
+        """Whether another verification/reset message may be queued for this address.
+
+        Every send carries a fresh idempotency key, so a legitimate resend is never
+        blocked by a stale one — which means only a per-address cap stops a caller
+        from queueing an unbounded number of messages to one mailbox. Fails closed
+        (refuses to send) if the shared ledger cannot be read.
+        """
+        identifier = hash_identifier(user.email)
+        try:
+            recent = self.store.count_recent(
+                "outbound_email", identifier, OUTBOUND_EMAIL_WINDOW_SECONDS
+            )
+        except Exception:
+            return False
+        if recent >= OUTBOUND_EMAIL_LIMIT:
+            self.store.record_event("outbound_email_throttled", actor_id=user.id)
+            return False
+        self.store.record_attempt("outbound_email", identifier, True)
+        return True
+
     def _queue_verification(self, user: UserRecord) -> None:
+        if not self._outbound_email_allowed(user):
+            return
         raw = new_opaque_token()
         th = self.store.create_email_verification(raw, user.id, user.email, VERIFY_TTL)
         # A fresh token per send, so the idempotency key is unique per delivery
@@ -353,6 +382,8 @@ class AccountsService:
         )
 
     def _queue_reset(self, user: UserRecord, *, ip_hash: str | None) -> None:
+        if not self._outbound_email_allowed(user):
+            return
         raw = new_opaque_token()
         th = self.store.create_password_reset(raw, user.id, RESET_TTL, ip_hash)
         event_key = f"reset:{user.id}:{th[:16]}"

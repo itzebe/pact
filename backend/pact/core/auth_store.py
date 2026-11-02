@@ -524,6 +524,20 @@ class InMemoryAuthStore:
                 if s == scope and i == identifier_hash and not ok and at >= cutoff
             )
 
+    def count_recent(self, scope: str, identifier_hash: str, window_seconds: int) -> int:
+        """Every recorded attempt for ``scope`` in the window, pass or fail.
+
+        Used to bound outbound verification/reset email per address, where the
+        ledger counts *sends*, not failures.
+        """
+        cutoff = time.time() - window_seconds
+        with self._guard:
+            return sum(
+                1
+                for s, i, at, _ok in self._attempts
+                if s == scope and i == identifier_hash and at >= cutoff
+            )
+
     # -- outbox ------------------------------------------------------------
     def enqueue_email(self, msg: OutboxMessage) -> bool:
         with self._guard:
@@ -812,6 +826,21 @@ class PostgresAuthStore:
             cur.execute(
                 "SELECT count(*) FROM login_attempts "
                 "WHERE scope = %s AND identifier_hash = %s AND ok = false "
+                "AND at > now() - make_interval(secs => %s)",
+                (scope, identifier_hash, window_seconds),
+            )
+            return int(cur.fetchone()[0])
+
+    def count_recent(self, scope: str, identifier_hash: str, window_seconds: int) -> int:
+        """Every recorded attempt for ``scope`` in the window, pass or fail.
+
+        Used to bound outbound verification/reset email per address, where the
+        ledger counts *sends*, not failures.
+        """
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM login_attempts "
+                "WHERE scope = %s AND identifier_hash = %s "
                 "AND at > now() - make_interval(secs => %s)",
                 (scope, identifier_hash, window_seconds),
             )
