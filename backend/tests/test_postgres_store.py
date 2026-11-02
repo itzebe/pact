@@ -272,7 +272,6 @@ def test_the_race_test_fails_when_the_lock_key_is_not_deterministic(clean_db, tm
     a salted ``hash()`` would introduce: every instance computes a different key,
     so no instance ever blocks, and several captures reach the provider.
     """
-    from pact.core.models import EscrowState
 
     store, ledger = clean_db
     job = _held_job(store, ledger)
@@ -280,12 +279,38 @@ def test_the_race_test_fails_when_the_lock_key_is_not_deterministic(clean_db, tm
     log = tmp_path / "provider.log"
     log.write_text("")
     # Same race, but the lock key varies per process so the lock is never shared.
+    # A wall-clock barrier only *approximates* simultaneity: process startup jitter
+    # (pool creation, schema DDL) can let the first racer persist its in-flight
+    # marker before the others re-read the row, which hides the race and makes this
+    # control silently stop proving anything. So rendezvous at the exact point that
+    # decides the race — *inside* settlement_claim, after the (broken, per-process)
+    # lock is taken and the row is read, before the state check. Every racer then
+    # sees the same HELD state and proceeds to capture; with the real shared lock the
+    # losers never reach this point.
     broken = RACE_SCRIPT.replace(
         "store = PostgresJobStore(dsn)",
+        "import contextlib as _ctx\n"
         "import pact.core.dbstore as _db\n"
         "_db._lock_key = lambda job_id: (hash(job_id) % (2**63))\n"
+        "\n"
+        "def _rendezvous():\n"
+        "    bdir = os.path.join(os.path.dirname(log_path) or '.', 'barrier')\n"
+        "    os.makedirs(bdir, exist_ok=True)\n"
+        "    open(os.path.join(bdir, str(os.getpid())), 'w').close()\n"
+        "    deadline = time.time() + 30\n"
+        "    while len(os.listdir(bdir)) < 4 and time.time() < deadline:\n"
+        "        time.sleep(0.005)\n"
+        "\n"
+        "_orig_claim = PostgresJobStore.settlement_claim\n"
+        "@_ctx.contextmanager\n"
+        "def _claim(self, job):\n"
+        "    with _orig_claim(self, job) as fresh:\n"
+        "        _rendezvous()\n"
+        "        yield fresh\n"
+        "PostgresJobStore.settlement_claim = _claim\n"
         "store = PostgresJobStore(dsn)",
     )
+    assert broken.count("_rendezvous") >= 2, "negative control failed to install the rendezvous"
     assert broken != RACE_SCRIPT, "negative control failed to patch the lock key"
     script = tmp_path / "race_broken.py"
     script.write_text(broken)
