@@ -102,6 +102,11 @@ configured (`PACT_EMAIL_PROVIDER` + credentials), every message is recorded
 honestly as `queued` and the dispatcher reports that no provider is configured; it
 never claims an email was sent.
 
+Drain the queue with `python -m scripts.dispatch_email` (add `--loop` to keep
+going until a pass claims nothing). Run it on a schedule — a platform cron, a
+worker, or by hand — once a provider is configured; messages queued while none
+was configured stay pending and are delivered on the first drain afterwards.
+
 ## Minting a token
 
 ```bash
