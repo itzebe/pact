@@ -64,9 +64,12 @@ class EmailProvider(Protocol):
 class NoopProvider:
     """The default provider: configured to send nothing.
 
-    It reports ``accepted=False, retryable=False`` so the dispatcher records the
-    message as permanently failed *for now* but leaves it recoverable: enabling a
-    real provider and re-draining picks it up. It never reports success.
+    It reports ``accepted=False, retryable=True`` so the dispatcher leaves the
+    message *pending* (recorded honestly as ``queued``) and retries it on the usual
+    bounded backoff. This matters for the day an operator configures a real
+    provider: messages queued while none was configured are still deliverable
+    afterwards, so an account created just before the provider went live is not
+    stranded. It never reports success.
     """
 
     name = "none"
@@ -74,7 +77,7 @@ class NoopProvider:
     def send(self, *, to_email: str, subject: str, body: str, idempotency_key: str) -> SendResult:
         return SendResult(
             accepted=False,
-            retryable=False,
+            retryable=True,
             error="no email provider is configured (set PACT_EMAIL_PROVIDER and its credentials)",
         )
 
@@ -205,12 +208,20 @@ class OutboxDispatcher:
         for msg in messages:
             subject, body = self._render(msg)
             if subject is None:
-                # No link could be built (e.g. missing PACT_PUBLIC_URL). Fail
-                # permanently rather than sending a useless message.
+                # No link could be built (e.g. PACT_PUBLIC_URL is unset). That is a
+                # configuration problem the operator can fix, so treat it as a
+                # retryable failure and keep the message: marking it terminal here
+                # would destroy a legitimate verification email. Bounded by the
+                # usual attempt cap, so it cannot retry forever.
+                next_at = datetime.now(timezone.utc) + backoff_for_attempt(msg.attempts)
+                terminal = msg.attempts >= _max_attempts()
                 self.store.mark_outbox_failed(
-                    msg.id, "no link could be built", datetime.now(timezone.utc), terminal=True
+                    msg.id, "no link could be built (is PACT_PUBLIC_URL set?)", next_at, terminal
                 )
-                failed += 1
+                if terminal:
+                    failed += 1
+                else:
+                    retried += 1
                 continue
             result = self.provider.send(
                 to_email=msg.to_email,
@@ -233,13 +244,13 @@ class OutboxDispatcher:
 
     def _render(self, msg) -> tuple[str | None, str | None]:
         if msg.kind == "verify_email":
-            raw = getattr(msg, "_raw_token", None)
+            raw = getattr(msg, "token_raw", None)
             link = self.link_builder("verify", raw) if (self.link_builder and raw) else None
             if not link:
                 return None, None
             return render_verification_email(link)
         if msg.kind == "password_reset":
-            raw = getattr(msg, "_raw_token", None)
+            raw = getattr(msg, "token_raw", None)
             link = self.link_builder("reset", raw) if (self.link_builder and raw) else None
             if not link:
                 return None, None

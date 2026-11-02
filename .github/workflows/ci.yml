@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - security/pact-prelaunch-hardening
+      - security/customer-auth-and-shared-stores
       - feat/paypal-webhooks-refund-reconciliation
 
 # Least privilege: these jobs only read the repository. No job needs a token that
@@ -81,16 +82,18 @@ jobs:
 
       # Prove the Postgres integration tests actually ran. ``test_postgres_store``,
       # ``test_ticket_store_postgres``, ``test_webhook_postgres``,
-      # ``test_webhook_persistence``, ``test_pool``, ``test_auth_store`` and
-      # ``test_accounts`` are the cross-instance safety net (settlement, SSE tickets,
-      # webhooks, connection pooling, sessions and the email outbox); a skip means
-      # that net is not deployed, which is a failure, not a pass.
+      # ``test_webhook_persistence``, ``test_pool``, ``test_auth_store``,
+      # ``test_accounts`` and ``test_email_dispatcher`` are the cross-instance safety
+      # net (settlement, SSE tickets, webhooks, connection pooling, sessions and the
+      # email outbox); a skip means that net is not deployed, which is a failure, not
+      # a pass.
       - name: Assert the PostgreSQL tests were not skipped
         working-directory: backend
         run: |
           python -m pytest tests/test_postgres_store.py tests/test_ticket_store_postgres.py \
             tests/test_webhook_postgres.py tests/test_webhook_persistence.py \
             tests/test_pool.py tests/test_auth_store.py tests/test_accounts.py \
+            tests/test_email_dispatcher.py \
             -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
           cat pg-tests.log
           if grep -Eq "[0-9]+ skipped" pg-tests.log; then

@@ -556,6 +556,8 @@ class InMemoryAuthStore:
                 msg.status = "sent"
                 msg.provider_id = provider_id
                 msg.delivery_status = delivery_status
+                # The raw token is no longer needed once the message is sent.
+                msg.token_raw = None
 
     def mark_outbox_failed(self, msg_id: str, error: str, next_attempt_at: datetime, terminal: bool) -> None:
         with self._guard:
@@ -565,6 +567,8 @@ class InMemoryAuthStore:
                 msg.last_error = error[:500]
                 msg.lease_expires_at = None
                 msg.next_attempt_at = next_attempt_at
+                if terminal:
+                    msg.token_raw = None
 
     def set_delivery_status(self, provider_id: str, delivery_status: str) -> int:
         with self._guard:
@@ -856,7 +860,8 @@ class PostgresAuthStore:
                 """
                 UPDATE email_outbox
                 SET status = 'sent', provider_id = %s, delivery_status = %s,
-                    completed_at = now(), lease_expires_at = NULL, last_error = NULL
+                    completed_at = now(), lease_expires_at = NULL, last_error = NULL,
+                    token_raw = NULL
                 WHERE id = %s
                 """,
                 (provider_id, delivery_status, msg_id),
@@ -870,11 +875,15 @@ class PostgresAuthStore:
                 SET status = %s, last_error = %s, next_attempt_at = %s,
                     lease_expires_at = NULL,
                     delivery_status = CASE WHEN %s THEN 'permanently_failed' ELSE delivery_status END,
-                    completed_at = CASE WHEN %s THEN now() ELSE NULL END
+                    completed_at = CASE WHEN %s THEN now() ELSE NULL END,
+                    -- A terminal message will never be rendered again, so drop the
+                    -- raw token: it must not sit in the outbox after it can no
+                    -- longer be used.
+                    token_raw = CASE WHEN %s THEN NULL ELSE token_raw END
                 WHERE id = %s
                 """,
                 ("dead" if terminal else "pending", error[:500], next_attempt_at,
-                 terminal, terminal, msg_id),
+                 terminal, terminal, terminal, msg_id),
             )
 
     def set_delivery_status(self, provider_id: str, delivery_status: str) -> int:
