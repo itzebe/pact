@@ -61,6 +61,39 @@ def test_a_statement_timeout_is_applied():
     pool.close()
 
 
+def test_statement_timeout_is_not_a_connection_startup_parameter():
+    """Regression: a managed pooler rejects ``options=-c statement_timeout=...``.
+
+    Passing the timeout as a libpq startup parameter fails *every* connection
+    behind Neon/pgbouncer with "unsupported startup parameter in options:
+    statement_timeout", which took production down. It must be applied with a
+    post-connect ``SET`` instead, so no ``options`` startup parameter is sent.
+    """
+    from pact.core.pool import DatabasePool
+
+    pool = DatabasePool(DATABASE_URL, max_size=1, statement_timeout_ms=1500)
+    try:
+        assert not pool._pool.kwargs.get("options"), "no options startup parameter"
+        # The connection is still usable and the timeout is in effect.
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SHOW statement_timeout")
+            assert cur.fetchone()[0] == "1500ms"
+    finally:
+        pool.close()
+
+
+def test_a_zero_statement_timeout_leaves_the_server_default():
+    from pact.core.pool import DatabasePool
+
+    pool = DatabasePool(DATABASE_URL, max_size=1, statement_timeout_ms=0)
+    try:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SHOW statement_timeout")
+            assert cur.fetchone()[0] == "0"
+    finally:
+        pool.close()
+
+
 def test_get_pool_is_keyed_by_dsn():
     """One DSN maps to one pool, so the stores do not multiply the connection count.
 
