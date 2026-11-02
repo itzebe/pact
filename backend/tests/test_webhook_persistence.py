@@ -143,3 +143,54 @@ def test_a_refund_webhook_is_persisted_to_postgres(pg_store):
     reloaded = PostgresJobStore(DATABASE_URL).get("job_persist")
     assert reloaded.escrow.state is EscrowState.REFUNDED, "refund was not persisted"
     assert reloaded.status is JobStatus.REFUNDED
+
+
+def test_a_refund_webhook_does_not_double_count_a_refund_pact_recorded(pg_store):
+    """A refund PACT's API recorded and its matching webhook are one refund, not two.
+
+    PACT's Refund API records a refund and the amount it moved; PayPal then delivers a
+    ``PAYMENT.CAPTURE.REFUNDED`` webhook whose ``resource.id`` is that same refund id.
+    Counting both would make a *partial* refund read as a full reversal. The webhook
+    must recognise the id it already counted and not add it again.
+    """
+    from pact.core.dbstore import PostgresJobStore
+    from pact.core.webhooks import process_event
+
+    from pact.core.webhook_store import PostgresWebhookStore
+
+    # PACT's API already recorded refund REF-PERSIST for 50 of a 100 capture.
+    job = Job(id="job_persist", title="t", brief="b", criteria=["c"], budget_max=Decimal("200"))
+    job.escrow.amount = Decimal("100.00")
+    job.escrow.currency = "USD"
+    job.escrow.state = EscrowState.RELEASED
+    job.status = JobStatus.SETTLED
+    job.escrow.capture_id = "CAP-PERSIST"
+    job.escrow.refunded_amount = Decimal("50.00")
+    job.escrow.refund_id = "REF-PERSIST"
+    job.escrow.refund_ids = ["REF-PERSIST"]
+    pg_store.save(job)
+
+    webhooks = PostgresWebhookStore(DATABASE_URL)
+    process_event(
+        payload={
+            "id": "WH-PERSIST-DOUBLECOUNT",
+            "event_type": "PAYMENT.CAPTURE.REFUNDED",
+            "resource": {
+                "id": "REF-PERSIST",
+                "status": "REFUNDED",
+                "custom_id": "job_persist",
+                "amount": {"value": "50.00", "currency_code": "USD"},
+            },
+        },
+        verified=True,
+        store=webhooks,
+        get_job=pg_store.get,
+        save_job=pg_store.save,
+        job_guard=_guard(pg_store),
+    )
+
+    reloaded = PostgresJobStore(DATABASE_URL).get("job_persist")
+    assert reloaded.escrow.refunded_amount == Decimal("50.00"), (
+        "the matching webhook double-counted a refund PACT already recorded"
+    )
+    assert reloaded.escrow.state is EscrowState.RELEASED, "a partial refund must not flip the job"

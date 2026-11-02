@@ -721,6 +721,10 @@ class SettlementEngine:
             job.escrow.refund_status = status
             job.escrow.refunded_amount = _to_decimal(job.escrow.refunded_amount) + requested
             job.escrow.refund_sequence += 1
+            if refund_id and refund_id not in job.escrow.refund_ids:
+                # Remember the provider id so the matching PAYMENT.CAPTURE.REFUNDED
+                # webhook (the same refund, reported a second time) is not counted again.
+                job.escrow.refund_ids = [*job.escrow.refund_ids, refund_id]
 
             fully_refunded = (
                 _to_decimal(job.escrow.refunded_amount) >= _to_decimal(job.escrow.amount)

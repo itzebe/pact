@@ -341,6 +341,41 @@ def test_partial_refund_events_accumulate_to_a_full_refund():
     assert job.status is JobStatus.REFUNDED
 
 
+def test_a_webhook_refund_already_recorded_by_pact_is_not_counted_twice():
+    """PACT's own refund and its matching webhook are one refund, not two.
+
+    The Refund API records the refund id and the amount; PayPal then reports the same
+    refund as ``PAYMENT.CAPTURE.REFUNDED`` with that id as ``resource.id``. Counting
+    both would turn a 40-of-120 partial refund into a full reversal.
+    """
+    job = make_job(EscrowState.RELEASED, capture_id="CAP-1", amount=Decimal("120.00"))
+    job.escrow.refunded_amount = Decimal("40.00")
+    job.escrow.refund_id = "REF-API-1"
+    job.escrow.refund_ids = ["REF-API-1"]
+
+    run(capture_event("e1", job.id, value="40.00", event_type=CAPTURE_REFUNDED,
+                      capture_id="REF-API-1"), {job.id: job})
+
+    assert job.escrow.refunded_amount == Decimal("40.00"), "the refund was counted twice"
+    assert job.escrow.state is EscrowState.RELEASED
+    entry = [e for e in job.ledger if e.kind == "webhook_refund_already_recorded"]
+    assert entry, "the duplicate should be recorded, not silently dropped"
+
+
+def test_a_distinct_webhook_refund_is_still_counted():
+    """Dedupe must not swallow a refund PACT did not initiate itself."""
+    job = make_job(EscrowState.RELEASED, capture_id="CAP-1", amount=Decimal("120.00"))
+    job.escrow.refunded_amount = Decimal("40.00")
+    job.escrow.refund_id = "REF-API-1"
+    job.escrow.refund_ids = ["REF-API-1"]
+
+    run(capture_event("e1", job.id, value="80.00", event_type=CAPTURE_REFUNDED,
+                      capture_id="REF-OTHER-2"), {job.id: job})
+
+    assert job.escrow.refunded_amount == Decimal("120.00")
+    assert job.escrow.state is EscrowState.REFUNDED
+
+
 def test_a_reversed_capture_is_a_full_reversal_regardless_of_amount():
     job = make_job(EscrowState.RELEASED, capture_id="CAP-1", amount=Decimal("120.00"))
     from pact.core.webhooks import CAPTURE_REVERSED

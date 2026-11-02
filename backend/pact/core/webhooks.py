@@ -353,10 +353,34 @@ def _apply_capture_not_completed(job: Job, event_type: str, payload: Any) -> boo
         # REFUNDED once the cumulative refunded total reaches the captured amount.
         # The event is verified, so its amount is trusted here — but it is only ever
         # used to *record* a provider fact, never to move money.
+        #
+        # For ``PAYMENT.CAPTURE.REFUNDED`` the resource id is the *refund* id. PACT's
+        # own Refund API already recorded that refund and counted its amount, and this
+        # event is the same money reported again, so a refund id already counted must
+        # not be added a second time — otherwise a partial refund reads as a full
+        # reversal. A ``REVERSED`` event is a whole-capture reversal, not a refund, so
+        # its id is not a refund id and this dedupe does not apply to it.
         refunded = _to_amount(value)
+        if event_type == CAPTURE_REFUNDED and capture_id in job.escrow.refund_ids:
+            if job.escrow.state != EscrowState.REFUNDED:
+                job.append(
+                    "webhook_refund_already_recorded",
+                    "paypal",
+                    f"PayPal webhook reports refund {capture_id}, already recorded by "
+                    f"PACT; not counted again",
+                    refund_id=capture_id,
+                    refunded_total=float(_to_amount(job.escrow.refunded_amount)),
+                    source="webhook",
+                )
+                return True
+            return False
         if refunded > 0:
             job.escrow.refunded_amount = _to_amount(job.escrow.refunded_amount) + refunded
         if capture_id:
+            # Deliberately not added to ``refund_ids``: that set is the refunds PACT's
+            # own API initiated, and only those can be reported a second time by this
+            # webhook. A refund seen only through webhooks is counted once per event id
+            # (PayPal retries reuse the event id, which the event store already dedupes).
             job.escrow.refund_id = job.escrow.refund_id or capture_id
         job.escrow.refund_status = status or "REFUNDED"
 
