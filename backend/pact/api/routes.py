@@ -35,6 +35,7 @@ from .auth import (
     require_buyer,
     require_principal,
     require_stream_principal,
+    require_verified,
 )
 
 log = logging.getLogger("pact.api")
@@ -352,6 +353,7 @@ async def run_job(
     job_id: str,
     request: Request,
     principal: Annotated[Principal, Depends(require_buyer)],
+    _verified: Annotated[Principal, Depends(require_verified)],
     seller_ids: list[str] | None = Query(default=None),
 ) -> dict[str, Any]:
     """Run the full lifecycle. Executed off the event loop so it cannot block it.
@@ -392,6 +394,7 @@ async def run_job(
 async def approve_job(
     job_id: str,
     principal: Annotated[Principal, Depends(require_buyer)],
+    _verified: Annotated[Principal, Depends(require_verified)],
 ) -> dict[str, Any]:
     """Continue a job after the buyer has approved the PayPal order.
 
@@ -421,6 +424,7 @@ async def approve_job(
 async def cancel_job(
     job_id: str,
     principal: Annotated[Principal, Depends(require_buyer)],
+    _verified: Annotated[Principal, Depends(require_verified)],
 ) -> dict[str, Any]:
     """Unwind a job's financial exposure so it can be safely deleted.
 
@@ -477,6 +481,7 @@ class RefundRequest(BaseModel):
 async def refund_job(
     job_id: str,
     principal: Annotated[Principal, Depends(require_buyer)],
+    _verified: Annotated[Principal, Depends(require_verified)],
     body: RefundRequest | None = None,
 ) -> dict[str, Any]:
     """Refund a captured payment, in full or in part.

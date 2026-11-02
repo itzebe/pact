@@ -6,6 +6,22 @@ was written by inspecting the deployment configuration in this repository and th
 live deployment, not from assumption. Every claim below names the file or the
 command that establishes it.
 
+## Verified environment (2026-10-31)
+
+The claims below were re-verified in this session against a **real PostgreSQL 17**
+instance (Debian 17.11) and a real **Docker** daemon, both started inside the
+workspace — not assumed from notes:
+
+- `docker info` succeeded only via `sudo`; the daemon was started with
+  `sudo dockerd`. The production `Dockerfile` built (`docker build -t pact:verify .`)
+  and the image started and answered `/api/health`.
+- PostgreSQL was installed (`postgresql-17`; the CI service container pins 16, and
+  the SQL used here is common to both) and the full suite ran against it.
+
+An earlier note that "Docker is unavailable" was stale; it is available and the
+image builds. The production platform remains Vercel (serverless, many instances),
+for which the multi-instance guarantees below must hold.
+
 ## What actually runs
 
 | Target | How it runs | Instances |
@@ -41,6 +57,32 @@ Without it (local development, a single container with a mounted volume) they fa
 back to process-local implementations. That is honest only because such a deployment
 *is* single-instance; the production check is what stops the fallback from ever
 being used where it would be wrong.
+
+The **customer-authentication store** (`pact.core.auth_store`) follows the same
+switch: `PostgresAuthStore` when `DATABASE_URL` is set, `InMemoryAuthStore`
+otherwise. The tables it owns — `users`, `email_verifications`,
+`password_reset_tokens`, `refresh_tokens`, `login_attempts`, `email_outbox`,
+`auth_events` — live in the shared database, so an account suspended on one instance
+is refused on every instance, and a refresh token rotated by one instance is spent
+everywhere.
+
+## Connection pooling
+
+Every PostgreSQL store draws connections from **one bounded pool per instance**
+(`pact.core.pool`, keyed by DSN so the stores share it). The default cap is 5
+connections (`PACT_PG_POOL_MAX_SIZE`), recycled after 300 s idle, with a 10 s
+server-side `statement_timeout`. This bounds each instance's footprint; it is **not**
+a global connection limit — the worst case across the fleet is
+`active instances × max_size`, which the operator must budget against the database
+plan.
+
+One deliberate exception: `PostgresJobStore.settlement_claim` holds a **session**
+advisory lock for the whole protected operation, so it uses a dedicated,
+non-pooled connection that is closed (not returned) on exit. Returning a
+session-locked connection to the pool would leak the lock into an unrelated request.
+For the same reason a transaction-mode pooler in front of the database is unsafe
+here — it would release the session lock between transactions and silently stop
+protecting the settlement.
 
 ## Is ticket consumption atomic across instances?
 
@@ -93,11 +135,18 @@ a shared store is present:
    advisory lock** that re-reads the authoritative row. The refund path added in this
    change reuses that same guard, so a refund and a capture on the same job — in any
    two instances — cannot both proceed.
-3. **The single-instance fallbacks.** `InMemoryTicketStore` and
-   `InMemoryWebhookStore` are process-local *by design*, and are only ever selected
-   when there is no `DATABASE_URL`, i.e. when the deployment is single-instance. A
-   configured-but-unreachable database produces the refusing
-   `UnavailableTicketStore`/equivalent, never the in-memory one.
+3. **The single-instance fallbacks.** `InMemoryTicketStore`,
+   `InMemoryWebhookStore` and `InMemoryAuthStore` are process-local *by design*, and
+   are only ever selected when there is no `DATABASE_URL`, i.e. when the deployment
+   is single-instance. A configured-but-unreachable database produces the refusing
+   `UnavailableTicketStore`/`UnavailableAuthStore`, never the in-memory one. For the
+   auth store specifically, an unreachable database makes the sensitive-operation
+   gate return `503` (fail closed) rather than admitting an unverified caller.
+
+There is no process-local *security decision* left. The only remaining process-local
+state is a per-instance connection pool (bounded, described above), which holds no
+authoritative data — every decision is made by a statement against the shared
+database.
 
 ## Is worker recovery still safe across instances?
 

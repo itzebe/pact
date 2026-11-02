@@ -62,16 +62,21 @@ ON CONFLICT (jti) DO UPDATE
 RETURNING jti
 """
 
-# Bounded, so one call can never delete an unbounded number of rows. Repeated
-# calls drain the table; each row lives only as long as its ticket did.
+# Bounded, so one call can never delete an unbounded number of rows. A bare
+# ``DELETE ... LIMIT`` is not valid PostgreSQL; the CTE + ``DELETE ... USING``
+# form is, and ``FOR UPDATE SKIP LOCKED`` lets concurrent pruners partition the
+# work instead of blocking each other.
 _PRUNE_SQL = """
-DELETE FROM consumed_tickets
-WHERE jti IN (
+WITH expired AS (
     SELECT jti FROM consumed_tickets
     WHERE expires_at <= now()
     ORDER BY expires_at
     LIMIT %s
+    FOR UPDATE SKIP LOCKED
 )
+DELETE FROM consumed_tickets t
+USING expired e
+WHERE t.jti = e.jti
 """
 
 # How many expired rows a single opportunistic prune may remove.
@@ -127,13 +132,14 @@ class PostgresTicketStore:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        with self._connect() as conn, conn.cursor() as cur:
+        from .pool import get_pool
+
+        self._pool = get_pool(dsn)
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(TICKET_SCHEMA)
 
     def _connect(self):
-        from .dbstore import _driver
-
-        return _driver().connect(self.dsn, autocommit=True)
+        return self._pool.connection(autocommit=True)
 
     def consume(self, ticket_id: str, ttl_seconds: float) -> bool:
         """Consume ``ticket_id`` exactly once across every instance.

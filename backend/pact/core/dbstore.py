@@ -121,7 +121,10 @@ class PostgresJobStore:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        with self._connect() as conn, conn.cursor() as cur:
+        from .pool import get_pool
+
+        self._pool = get_pool(dsn)
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(SCHEMA)
             for statement in MIGRATIONS:
                 cur.execute(statement)
@@ -129,7 +132,8 @@ class PostgresJobStore:
     # ------------------------------------------------------------ plumbing
 
     def _connect(self):
-        return _driver().connect(self.dsn, autocommit=True)
+        """A pooled connection. The pool is bounded per instance (see core.pool)."""
+        return self._pool.connection(autocommit=True)
 
     @staticmethod
     def _jsonb(value: dict):
@@ -316,21 +320,25 @@ class PostgresJobStore:
         instance sees the capture the first one recorded rather than its own stale
         copy. Without this, ``_settle_lock`` only protects a single process and a
         duplicate capture is reachable.
+
+        The lock is held on a **dedicated, non-pooled** connection for the whole
+        protected operation (``pool.direct()``). A pooled connection must not be
+        handed back with a session lock still held, or the lock would leak into an
+        unrelated request that later reuses that connection. The pool is bounded
+        per instance; this one extra connection is deliberate and short-lived.
         """
-        conn = self._connect()
-        key = _lock_key(job.id)
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT pg_advisory_lock(%s)", (key,))
-            yield self._load(conn, job.id)
-        finally:
+        with self._pool.direct() as conn:
+            key = _lock_key(job.id)
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT pg_advisory_unlock(%s)", (key,))
-            except Exception as exc:  # never mask the caller's error
-                log.warning("Could not release settlement lock for %s: %s", job.id, exc)
+                    cur.execute("SELECT pg_advisory_lock(%s)", (key,))
+                yield self._load(conn, job.id)
             finally:
-                conn.close()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT pg_advisory_unlock(%s)", (key,))
+                except Exception as exc:  # never mask the caller's error
+                    log.warning("Could not release settlement lock for %s: %s", job.id, exc)
 
 
 class PostgresReputationLedger:
@@ -342,7 +350,10 @@ class PostgresReputationLedger:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        with self._connect() as conn, conn.cursor() as cur:
+        from .pool import get_pool
+
+        self._pool = get_pool(dsn)
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(SCHEMA)
 
     def _connect(self):
@@ -351,8 +362,9 @@ class PostgresReputationLedger:
         Autocommit would commit the ``FOR UPDATE`` immediately and release the row
         lock before the write, so concurrent increments for the same agent would
         read the same value and overwrite each other — silently losing settlements.
+        The connection is still drawn from the bounded per-instance pool.
         """
-        return _driver().connect(self.dsn, autocommit=False)
+        return self._pool.connection(autocommit=False)
 
     @staticmethod
     def _jsonb(value: dict):

@@ -20,6 +20,7 @@ from starlette.types import Scope
 
 from . import __version__
 from .api.routes import public_router, router, stream_router
+from .api import auth_routes
 from .config import settings
 from .core.ticket_store import ticket_store
 
@@ -114,6 +115,11 @@ app.add_middleware(
 app.include_router(public_router)
 app.include_router(router)
 app.include_router(stream_router)
+# Customer authentication. The public auth routes (register/login/refresh/...) are
+# reachable before a session exists; /auth/me and /auth/password/change carry their
+# own router-level require_principal dependency. See pact/api/auth_routes.py.
+app.include_router(auth_routes.public_router)
+app.include_router(auth_routes.router)
 
 
 def _static_dir() -> Path | None:

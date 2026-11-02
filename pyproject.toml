@@ -23,4 +23,6 @@ dependencies = [
     "sse-starlette>=2.1",
     "PyJWT>=2.8",
     "psycopg[binary]>=3.2",
+    "psycopg_pool>=3.2",
+    "argon2-cffi>=23.1",
 ]
