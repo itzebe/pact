@@ -80,14 +80,15 @@ jobs:
         run: python -m pytest tests/ -q
 
       # Prove the Postgres integration tests actually ran. ``test_postgres_store``,
-      # ``test_ticket_store_postgres`` and ``test_webhook_postgres`` are the
-      # cross-instance safety net; a skip means that net is not deployed, which is a
-      # failure, not a pass.
+      # ``test_ticket_store_postgres``, ``test_webhook_postgres`` and
+      # ``test_webhook_persistence`` are the cross-instance safety net; a skip means
+      # that net is not deployed, which is a failure, not a pass.
       - name: Assert the PostgreSQL tests were not skipped
         working-directory: backend
         run: |
           python -m pytest tests/test_postgres_store.py tests/test_ticket_store_postgres.py \
-            tests/test_webhook_postgres.py -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
+            tests/test_webhook_postgres.py tests/test_webhook_persistence.py \
+            -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
           cat pg-tests.log
           if grep -Eq "[0-9]+ skipped" pg-tests.log; then
             echo "::error::PostgreSQL integration tests were skipped; they must run in CI."

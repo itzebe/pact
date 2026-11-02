@@ -171,28 +171,40 @@ def process_event(
         return WebhookOutcome.DUPLICATE, job
 
     def _guarded_apply():
+        """Apply the event to the record that will be persisted, and save it here.
+
+        The record that is *mutated* is the record that must be *saved*. On the
+        Postgres path the guard hands back the authoritative row, so the event is
+        applied to that object; saving it inside the guard is what makes the write
+        atomic with respect to a concurrent capture or refund on the same job — a
+        save issued after the guard released could clobber a concurrent writer, and
+        saving a different object than the one mutated would persist nothing.
+        """
         if job_guard is None:
-            return _apply(job, record, payload)
+            changed = _apply(job, record, payload)
+            if changed:
+                save_job(job)
+            return job, changed
         with job_guard(job):
-            # The guard may hand back the authoritative row (Postgres) which the
+            # The guard may hand back the authoritative row (Postgres), which the
             # settlement engine adopts; re-read so the event is applied to the same
             # record a concurrent capture would have written.
-            fresh = get_job(job.id)
-            return _apply(fresh if fresh is not None else job, record, payload)
+            target = get_job(job.id) or job
+            changed = _apply(target, record, payload)
+            if changed:
+                save_job(target)
+            return target, changed
 
     try:
-        applied = _guarded_apply()
+        applied_job, applied = _guarded_apply()
     except Exception as exc:
         # The event is claimed but not applied. Leave the outcome honest; PayPal will
         # redeliver and the claim makes that a no-op, so an operator must reconcile.
         log.error("Failed to apply webhook event %s: %s", record.event_id, type(exc).__name__)
         store.settle(record.event_id, "error")
         raise
-    if applied:
-        # Re-read the record the guard applied to, so the save persists the right one.
-        save_job(get_job(job.id) or job)
     store.settle(record.event_id, WebhookOutcome.APPLIED if applied else WebhookOutcome.IGNORED)
-    return (WebhookOutcome.APPLIED if applied else WebhookOutcome.IGNORED), job
+    return (WebhookOutcome.APPLIED if applied else WebhookOutcome.IGNORED), applied_job
 
 
 def _apply(job: Job, record: WebhookRecord, payload: Any) -> bool:
