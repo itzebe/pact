@@ -57,6 +57,26 @@ def _driver_pool():
     return ConnectionPool
 
 
+def _statement_timeout_configure(ms: int):
+    """Return a pool ``configure`` callback that applies ``statement_timeout``.
+
+    It runs on every new pooled connection, immediately after connect and before
+    the connection is handed out. ``SET`` is used rather than a libpq ``options``
+    startup parameter: managed poolers reject the latter, and a rejected startup
+    parameter fails *every* connection, which would take the deployment down.
+    """
+
+    def configure(conn: Any) -> None:
+        if ms <= 0:
+            return
+        with conn.cursor() as cur:
+            # SET does not accept a bind parameter for statement_timeout; the value
+            # is an int we control (never user input), so a literal is safe here.
+            cur.execute(f"SET statement_timeout = {int(ms)}")
+
+    return configure
+
+
 class DatabasePool:
     """A bounded pool for one DSN, shared by every store that needs it."""
 
@@ -93,7 +113,17 @@ class DatabasePool:
             max_idle=float(max_idle_seconds),
             # A dead connection is discarded and reopened rather than handed out.
             check=ConnectionPool.check_connection,
-            kwargs={"options": f"-c statement_timeout={int(statement_timeout_ms)}"},
+            # Connections are created in autocommit mode. That lets the configure
+            # callback's ``SET`` leave the connection in IDLE state (a non-autocommit
+            # connection would open a transaction and the pool would discard it), and
+            # every checkout sets ``autocommit`` explicitly anyway.
+            kwargs={"autocommit": True},
+            # statement_timeout is applied as a plain SET *after* connecting, never
+            # as a libpq startup parameter. A managed pooler (Neon, pgbouncer)
+            # rejects unknown startup parameters with "unsupported startup parameter
+            # in options: statement_timeout", which fails every pooled connection and
+            # takes the whole deployment down. A SET statement is accepted everywhere.
+            configure=_statement_timeout_configure(int(statement_timeout_ms)),
             # No eager connections: a cold start must not open sockets it may not
             # need. The pool opens on first use.
             open=False,
