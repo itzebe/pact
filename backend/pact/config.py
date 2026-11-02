@@ -161,7 +161,20 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("PACT_DATA_DIR", str(ROOT / "data"))))
     # Postgres is used when set. Serverless platforms have no durable disk, so a
     # connection string is the only way the ledger survives there.
+    #
+    # DATABASE_URL is the *pooled* endpoint (e.g. Neon's "-pooler" host, which is
+    # PgBouncer in transaction mode). It is correct for ordinary request/response
+    # queries, where every operation is short and self-contained.
     database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+    # DATABASE_URL_UNPOOLED is the *direct* endpoint (the same host without the
+    # "-pooler" suffix). Session-scoped work — the settlement advisory lock — must
+    # use it, because a transaction-mode pooler hands each client a different
+    # server connection per transaction, so a session lock is released between
+    # statements and silently stops protecting the settlement. Never the pooled
+    # DSN for that work (see core.pool.DatabasePool.direct).
+    database_url_unpooled: str = field(
+        default_factory=lambda: os.getenv("DATABASE_URL_UNPOOLED", "")
+    )
     # Mock PayPal is OFF by default. A mock settlement moves no money, so a
     # deployment that silently used it would report payments that never happened.
     # Development turns it on explicitly; production leaves it off.
@@ -246,6 +259,19 @@ class Settings:
     )
 
     @property
+    def settlement_database_url(self) -> str:
+        """The DSN session-scoped work must use: the direct endpoint, never pooled.
+
+        Falls back to ``DATABASE_URL`` only when it is the *only* thing configured,
+        which is the case in development and in the test suite (a plain PostgreSQL
+        with no pooler, where the two endpoints are identical). A production
+        deployment is required to set both (see ``validate_runtime``); this property
+        never invents a direct endpoint it was not given, and ``pool.direct()``
+        additionally refuses to hold a session lock on a pooled endpoint it detects.
+        """
+        return self.database_url_unpooled.strip() or self.database_url.strip()
+
+    @property
     def is_production(self) -> bool:
         return self.environment not in {"development", "dev", "test", "local"}
 
@@ -296,6 +322,20 @@ class Settings:
                     "DATABASE_URL is not set, so this production deployment would fall "
                     "back to process-local ticket storage and a non-durable local "
                     "ledger; set it to a PostgreSQL connection string"
+                )
+            if self.database_url.strip() and not self.database_url_unpooled.strip():
+                # Settlement serialises instances with a *session* advisory lock. On a
+                # transaction-mode pooler (Neon's "-pooler" host, pgbouncer) the server
+                # connection is handed back after each transaction, so the lock is
+                # released between statements and two instances can both capture the
+                # same payment. The direct endpoint must be configured explicitly; the
+                # value is never echoed here — only its absence is reported.
+                problems.append(
+                    "DATABASE_URL_UNPOOLED is not set, so session-scoped settlement "
+                    "locks have no direct endpoint and would silently lose their "
+                    "protection behind a transaction-mode pooler; set it to the direct "
+                    "PostgreSQL endpoint (for Neon, the host without the '-pooler' "
+                    "suffix)"
                 )
         if self.auth.configured and self.auth.algorithm not in ALLOWED_AUTH_ALGORITHMS:
             problems.append(

@@ -227,7 +227,8 @@ except Exception as exc:  # the refusal we are asserting on
 print("JSON:" + json.dumps(out))
 """
     env = {k: v for k, v in os.environ.items()
-           if k not in {"DATABASE_URL", "PACT_DATA_DIR", "PACT_ENV", "PACT_REQUIRE_REAL_PAYPAL",
+           if k not in {"DATABASE_URL", "DATABASE_URL_UNPOOLED", "PACT_DATA_DIR", "PACT_ENV",
+                        "PACT_REQUIRE_REAL_PAYPAL",
                         "PACT_ALLOW_MOCK_PAYPAL", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
                         "LLM_API_KEY"}}
     env["PYTHONPATH"] = str(BACKEND)
@@ -295,8 +296,9 @@ def test_production_with_unavailable_postgresql_is_refused(tmp_path):
         **_PROD_BASE,
         "PACT_DATA_DIR": str(tmp_path / "data"),
         "DATABASE_URL": "postgresql://nobody@127.0.0.1:1/nope",
+        "DATABASE_URL_UNPOOLED": "postgresql://nobody@127.0.0.1:1/nope",
     })
-    # The DSN is present, so config validation passes; the failure is the store.
+    # The DSNs are present, so config validation passes; the failure is the store.
     assert out["problems"] == [], out["problems"]
     assert out["ticket_backend"] == "unavailable"
     assert out["started"] is False, "an unreachable production database must refuse to boot"
@@ -325,11 +327,29 @@ def test_production_with_valid_postgresql_starts(tmp_path):
     dsn = os.getenv("DATABASE_URL", "")
     if not dsn:
         pytest.skip("DATABASE_URL not set; the valid-Postgres startup test is opt-in")
-    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data"), "DATABASE_URL": dsn})
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "DATABASE_URL": dsn,
+        "DATABASE_URL_UNPOOLED": dsn,
+    })
     assert out["problems"] == [], out["problems"]
     assert out["started"] is True, out["error"]
     assert out["ticket_backend"] == "postgres"
     assert out["ticket_shared"] is True
     assert out["job_backend"] == "postgres"
     assert out["job_durable"] is True
+
+
+def test_production_without_an_unpooled_dsn_is_refused(tmp_path):
+    """A pooled DSN alone must not boot: session settlement locks would be unsafe."""
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "DATABASE_URL": "postgresql://user:pw@db-pooler.internal:5432/pact",
+    })
+    assert any("DATABASE_URL_UNPOOLED" in p for p in out["problems"]), out["problems"]
+    assert out["started"] is False, "a pooled DSN alone must not start in production"
+    # The refusal never echoes the connection string or its credentials.
+    assert "user" not in out["error"] and "pw" not in out["error"]
 

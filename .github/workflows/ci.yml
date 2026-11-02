@@ -51,6 +51,9 @@ jobs:
       # Matches the service container above. Not a secret: it is a throwaway
       # database that exists only for the duration of the job.
       DATABASE_URL: postgresql://pact:pact@localhost:5432/pact
+      # The pooled (transaction-mode) endpoint PgBouncer provides. The settlement
+      # lock must NOT use it; the tests assert that the direct endpoint is used.
+      PGBOUNCER_URL: postgresql://pact:pact@127.0.0.1:6432/pact
       PACT_ENV: test
       PACT_ALLOW_MOCK_PAYPAL: "true"
       PACT_AUTH_SECRET: ci-only-signing-secret-not-used-anywhere-real
@@ -76,6 +79,39 @@ jobs:
         working-directory: backend
         run: python -c "import psycopg; psycopg.connect('$DATABASE_URL').close()"
 
+      # PgBouncer in *transaction* mode, on port 6432, in front of the same
+      # database. Production's DATABASE_URL is Neon's pooled endpoint, which is a
+      # transaction-mode pooler; without one here the pooled-endpoint settlement
+      # tests would skip and the very bug they exist for would go unexercised.
+      - name: Start PgBouncer (transaction mode)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pgbouncer
+          printf '%s\n' '"pact" "pact"' | sudo tee /etc/pgbouncer/userlist.txt >/dev/null
+          sudo tee /etc/pgbouncer/pgbouncer.ini >/dev/null <<'INI'
+          [databases]
+          pact = host=127.0.0.1 port=5432 dbname=pact
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6432
+          auth_type = plain
+          auth_file = /etc/pgbouncer/userlist.txt
+          pool_mode = transaction
+          max_client_conn = 200
+          default_pool_size = 10
+          ignore_startup_parameters = extra_float_digits,options
+          pidfile = /tmp/pgbouncer.pid
+          logfile = /tmp/pgbouncer.log
+          INI
+          sudo pgbouncer -d /etc/pgbouncer/pgbouncer.ini
+          for i in $(seq 1 20); do
+            if python -c "import psycopg,sys; psycopg.connect('$PGBOUNCER_URL', connect_timeout=3).close()" 2>/dev/null; then
+              echo "PgBouncer is accepting connections"; break
+            fi
+            sleep 1
+          done
+          python -c "import psycopg; psycopg.connect('$PGBOUNCER_URL', connect_timeout=3).close(); print('pooled endpoint reachable')"
+
       - name: Run the backend test suite
         working-directory: backend
         run: python -m pytest tests/ -q
@@ -83,17 +119,18 @@ jobs:
       # Prove the Postgres integration tests actually ran. ``test_postgres_store``,
       # ``test_ticket_store_postgres``, ``test_webhook_postgres``,
       # ``test_webhook_persistence``, ``test_pool``, ``test_auth_store``,
-      # ``test_accounts`` and ``test_email_dispatcher`` are the cross-instance safety
-      # net (settlement, SSE tickets, webhooks, connection pooling, sessions and the
-      # email outbox); a skip means that net is not deployed, which is a failure, not
-      # a pass.
+      # ``test_accounts``, ``test_email_dispatcher`` and ``test_settlement_pooling``
+      # are the cross-instance safety net (settlement, SSE tickets, webhooks,
+      # connection pooling, sessions and the email outbox); a skip means that net is
+      # not deployed, which is a failure, not a pass. ``test_settlement_pooling``
+      # needs PGBOUNCER_URL, which the step above provides.
       - name: Assert the PostgreSQL tests were not skipped
         working-directory: backend
         run: |
           python -m pytest tests/test_postgres_store.py tests/test_ticket_store_postgres.py \
             tests/test_webhook_postgres.py tests/test_webhook_persistence.py \
             tests/test_pool.py tests/test_auth_store.py tests/test_accounts.py \
-            tests/test_email_dispatcher.py \
+            tests/test_email_dispatcher.py tests/test_settlement_pooling.py \
             -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
           cat pg-tests.log
           if grep -Eq "[0-9]+ skipped" pg-tests.log; then

@@ -549,8 +549,28 @@ def test_runtime_validation_is_quiet_for_a_sound_production_deployment():
         allow_mock_paypal=False,
         paypal=dataclasses.replace(settings.paypal, client_id="id", client_secret="secret"),
         database_url="postgresql://user:pw@db.internal:5432/pact",
+        database_url_unpooled="postgresql://user:pw@db.internal:5432/pact",
     )
     assert sound.validate_runtime() == []
+
+
+def test_runtime_validation_flags_a_production_deployment_with_only_a_pooled_database():
+    """A pooled DSN alone loses the session-scoped settlement lock; refuse it."""
+    import dataclasses
+
+    from pact.config import AuthSettings, Settings
+
+    pooled_only = Settings(
+        auth=AuthSettings(secret="a-sufficiently-long-random-secret-value"),
+        environment="production",
+        allow_mock_paypal=False,
+        paypal=dataclasses.replace(settings.paypal, client_id="id", client_secret="secret"),
+        database_url="postgresql://user:pw@db-pooler.internal:5432/pact",
+    )
+    problems = pooled_only.validate_runtime()
+    assert any("DATABASE_URL_UNPOOLED" in p for p in problems)
+    # The message never echoes the connection string.
+    assert all("db-pooler.internal" not in p for p in problems)
 
 
 def test_runtime_validation_flags_a_production_deployment_without_a_database():

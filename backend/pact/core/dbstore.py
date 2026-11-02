@@ -123,7 +123,11 @@ class PostgresJobStore:
         self.dsn = dsn
         from .pool import get_pool
 
-        self._pool = get_pool(dsn)
+        # The direct endpoint for the session-scoped settlement lock: the configured
+        # unpooled DSN when set, otherwise this store's own DSN (a plain PostgreSQL,
+        # as in development and the test suite, where the two are the same).
+        direct_dsn = settings.database_url_unpooled.strip() or dsn
+        self._pool = get_pool(dsn, direct_dsn=direct_dsn)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(SCHEMA)
             for statement in MIGRATIONS:
@@ -321,11 +325,13 @@ class PostgresJobStore:
         copy. Without this, ``_settle_lock`` only protects a single process and a
         duplicate capture is reachable.
 
-        The lock is held on a **dedicated, non-pooled** connection for the whole
-        protected operation (``pool.direct()``). A pooled connection must not be
-        handed back with a session lock still held, or the lock would leak into an
-        unrelated request that later reuses that connection. The pool is bounded
-        per instance; this one extra connection is deliberate and short-lived.
+        The lock is held on a **dedicated, non-pooled** connection to the *direct*
+        endpoint (``pool.direct()`` → ``DATABASE_URL_UNPOOLED``) for the whole
+        protected operation. Neither the application pool nor a transaction-mode
+        pooler may be used: a pooler hands the server connection back after every
+        transaction, so the lock is released between statements and a second
+        instance can take it. ``pool.direct()`` refuses an endpoint that looks or
+        behaves like a pooler, so this cannot silently degrade.
         """
         with self._pool.direct() as conn:
             key = _lock_key(job.id)
