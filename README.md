@@ -116,7 +116,7 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 437 passed, 74 skipped (the Postgres tests skip themselves). The skip count
+# 437 passed, 76 skipped (the Postgres tests skip themselves). The skip count
 # varies with whether the optional psycopg driver is installed.
 python -m pytest tests/ -q
 ```
@@ -130,7 +130,7 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 511 passed — nothing skipped.
+# 513 passed — nothing skipped.
 createdb pact                                          # or a Neon/Supabase/RDS URL
 export DATABASE_URL=postgresql://localhost/pact
 python -m pytest tests/ -q
