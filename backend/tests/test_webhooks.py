@@ -334,11 +334,28 @@ def test_a_partial_refund_event_does_not_flip_a_settlement():
 
 def test_partial_refund_events_accumulate_to_a_full_refund():
     job = make_job(EscrowState.RELEASED, capture_id="CAP-1", amount=Decimal("120.00"))
-    run(capture_event("e1", job.id, value="40.00", event_type=CAPTURE_REFUNDED), {job.id: job})
-    run(capture_event("e2", job.id, value="80.00", event_type=CAPTURE_REFUNDED), {job.id: job})
+    # Two *distinct* refunds: PayPal assigns a new refund id per refund, so reusing
+    # one id here would model the same refund reported twice, which must not count.
+    run(capture_event("e1", job.id, value="40.00", event_type=CAPTURE_REFUNDED,
+                      capture_id="REF-A"), {job.id: job})
+    run(capture_event("e2", job.id, value="80.00", event_type=CAPTURE_REFUNDED,
+                      capture_id="REF-B"), {job.id: job})
     assert job.escrow.refunded_amount == Decimal("120.00")
     assert job.escrow.state is EscrowState.REFUNDED
     assert job.status is JobStatus.REFUNDED
+
+
+def test_the_same_refund_event_twice_is_counted_once():
+    """A redelivered refund event must not accumulate twice (belt and braces: the
+    event store also dedupes on event id, but the refund id is the money identity)."""
+    job = make_job(EscrowState.RELEASED, capture_id="CAP-1", amount=Decimal("120.00"))
+    payload = capture_event("e1", job.id, value="40.00", event_type=CAPTURE_REFUNDED,
+                            capture_id="REF-A")
+    run(payload, {job.id: job})
+    # A second event with a *different* event id but the same refund id.
+    run(capture_event("e2", job.id, value="40.00", event_type=CAPTURE_REFUNDED,
+                      capture_id="REF-A"), {job.id: job})
+    assert job.escrow.refunded_amount == Decimal("40.00"), "one refund was counted twice"
 
 
 def test_a_webhook_refund_already_recorded_by_pact_is_not_counted_twice():

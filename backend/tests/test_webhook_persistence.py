@@ -194,3 +194,71 @@ def test_a_refund_webhook_does_not_double_count_a_refund_pact_recorded(pg_store)
         "the matching webhook double-counted a refund PACT already recorded"
     )
     assert reloaded.escrow.state is EscrowState.RELEASED, "a partial refund must not flip the job"
+
+
+def test_a_refund_counted_by_its_webhook_is_not_counted_again_by_the_api(pg_store):
+    """The crash window: the provider applied a refund, but PACT persisted nothing.
+
+    PACT calls the Refund API; PayPal applies the refund and assigns a refund id, but
+    the API instance crashes (or the write fails) before the row is updated — so
+    ``refunded_amount`` and ``refund_ids`` are still empty. PayPal then delivers the
+    ``PAYMENT.CAPTURE.REFUNDED`` webhook for that refund, which counts it. When the
+    refund is retried, PayPal returns the *same* refund for the same idempotency key
+    (it does not move money again). If the API adds the amount a second time, PACT
+    reports a 50-of-100 refund as a full 100 reversal while only 50 left the account.
+
+    Requires the webhook to record the refund id it counted, and the API to treat a
+    refund id already recorded as already counted.
+    """
+    from pact.core.dbstore import PostgresJobStore
+    from pact.core.webhook_store import PostgresWebhookStore
+    from pact.core.webhooks import process_event
+
+    from tests.test_refund import IdempotentProvider
+
+    provider = IdempotentProvider(capture_id="CAP-CRASH", amount="100.00")
+    job = _seed(pg_store, EscrowState.RELEASED, "CAP-CRASH", JobStatus.SETTLED)
+    job.escrow.amount = Decimal("100.00")
+    pg_store.save(job)
+
+    # The provider applies the refund (as the API call would), then PACT "crashes":
+    # the row is left untouched, so refund_sequence is still 0 and the retry reuses
+    # the same idempotency key.
+    first = provider.refund_capture("CAP-CRASH", amount=Decimal("50.00"), currency="USD",
+                                    idempotency_key="pact-refund-job_persist-1")
+    assert provider.capture_refunded_value() == Decimal("50.00")
+
+    webhooks = PostgresWebhookStore(DATABASE_URL)
+    process_event(
+        payload={
+            "id": "WH-CRASH-1",
+            "event_type": "PAYMENT.CAPTURE.REFUNDED",
+            "resource": {"id": first["id"], "status": "COMPLETED",
+                         "custom_id": "job_persist",
+                         "amount": {"value": "50.00", "currency_code": "USD"}},
+        },
+        verified=True, store=webhooks, get_job=pg_store.get, save_job=pg_store.save,
+        job_guard=_guard(pg_store),
+    )
+    after_webhook = PostgresJobStore(DATABASE_URL).get("job_persist")
+    assert after_webhook.escrow.refunded_amount == Decimal("50.00")
+    assert first["id"] in after_webhook.escrow.refund_ids
+
+    # The retry: same key -> same provider refund -> must not count again.
+    from pact.core.settlement import SettlementEngine
+    from pact.core.store import ReputationLedger
+    import tempfile
+    from pathlib import Path
+
+    engine = SettlementEngine(
+        provider, ReputationLedger(Path(tempfile.mkdtemp()) / "rep.json"), store=pg_store
+    )
+    retried = engine.refund_capture(pg_store.get("job_persist"), amount=Decimal("50.00"))
+
+    assert retried.escrow.refunded_amount == Decimal("50.00"), (
+        "the refund was counted twice across the crash window"
+    )
+    final = PostgresJobStore(DATABASE_URL).get("job_persist")
+    assert final.escrow.refunded_amount == Decimal("50.00")
+    assert final.escrow.state is EscrowState.RELEASED, "a 50-of-100 refund must not read as full"
+    assert provider.capture_refunded_value() == Decimal("50.00"), "provider moved only 50"

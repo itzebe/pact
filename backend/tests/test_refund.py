@@ -56,6 +56,41 @@ def engine(tmp_path) -> PactEngine:
     )
 
 
+class IdempotentProvider(MockPayPalEscrowClient):
+    """The mock, with PayPal's real idempotency-key semantics.
+
+    The production mock assigns a fresh refund id on every call and ignores the
+    idempotency key, so it cannot model a *retry*: PayPal returns the original refund
+    for a repeated key and does not move money a second time. Tests that exercise a
+    lost response, a crash between the provider applying a refund and the write, or a
+    client retry need this behaviour or they silently model a second real refund.
+    """
+
+    def __init__(self, capture_id: str = "CAP-IDEM", amount: str = "100.00") -> None:
+        super().__init__()
+        self.refund_calls: list[str | None] = []
+        order = self.create_order(amount=Decimal(amount), currency="USD", reference_id="seed")
+        auth = self.authorize_order(order["id"])
+        cap = self.capture_authorization(auth.id, amount=Decimal(amount), currency="USD")
+        self._seed_capture_id = capture_id
+        # Re-key the capture so the caller can refer to it by a stable id.
+        self._captures[capture_id] = self._captures.pop(cap.id)
+        self._captures[capture_id]["id"] = capture_id
+        self._by_key: dict[str, dict] = {}
+
+    def refund_capture(self, capture_id, *, amount=None, currency=None, idempotency_key=None):
+        self.refund_calls.append(idempotency_key)
+        if idempotency_key in self._by_key:
+            return dict(self._by_key[idempotency_key])
+        body = super().refund_capture(capture_id, amount=amount, currency=currency,
+                                      idempotency_key=idempotency_key)
+        self._by_key[idempotency_key] = dict(body)
+        return body
+
+    def capture_refunded_value(self) -> Decimal:
+        return Decimal(self._captures[self._seed_capture_id].get("refunded_value", "0.00"))
+
+
 def settled_job(engine: PactEngine, amount: str = "120.00"):
     """A job driven to a completed capture, ready to be refunded."""
     job = engine.create_job(

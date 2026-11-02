@@ -114,10 +114,12 @@ class EscrowRecord(BaseModel):
     # while a retry of the same call reuses one.
     refunded_amount: Decimal = Decimal("0")
     refund_sequence: int = 0
-    # Provider refund ids already counted in ``refunded_amount``. PACT's own Refund API
-    # and PayPal's ``PAYMENT.CAPTURE.REFUNDED`` webhook are two notifications of the
-    # *same* refund, so a webhook naming a refund already recorded here must not be
-    # added again or a partial refund reads as a full reversal.
+    # Provider refund ids already counted in ``refunded_amount``, whichever path
+    # counted them first. PACT's own Refund API and PayPal's
+    # ``PAYMENT.CAPTURE.REFUNDED`` webhook are two notifications of the *same* refund,
+    # so whichever records it first marks the id here and the other must not add the
+    # amount again — otherwise a partial refund reads as a full reversal, or a lost
+    # response followed by a retry double-counts.
     refund_ids: list[str] = Field(default_factory=list)
     amount: Decimal = Decimal("0")
     currency: str = "USD"

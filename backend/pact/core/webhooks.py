@@ -355,11 +355,16 @@ def _apply_capture_not_completed(job: Job, event_type: str, payload: Any) -> boo
         # used to *record* a provider fact, never to move money.
         #
         # For ``PAYMENT.CAPTURE.REFUNDED`` the resource id is the *refund* id. PACT's
-        # own Refund API already recorded that refund and counted its amount, and this
-        # event is the same money reported again, so a refund id already counted must
-        # not be added a second time — otherwise a partial refund reads as a full
-        # reversal. A ``REVERSED`` event is a whole-capture reversal, not a refund, so
-        # its id is not a refund id and this dedupe does not apply to it.
+        # own Refund API and this webhook are two notifications of the same money, so
+        # a refund id already counted must not be added a second time — otherwise a
+        # partial refund reads as a full reversal. ``refund_ids`` holds every refund
+        # id already reflected in ``refunded_amount``, whichever path counted it
+        # first, so the dedupe works in both directions: an API-initiated refund is
+        # not re-counted by its webhook, and a webhook-counted refund is not
+        # re-counted by a later API call returning the same provider refund (a lost
+        # response, or a crash between the provider applying it and the write).
+        # A ``REVERSED`` event is a whole-capture reversal, not a refund, so its id
+        # is not a refund id and this dedupe does not apply to it.
         refunded = _to_amount(value)
         if event_type == CAPTURE_REFUNDED and capture_id in job.escrow.refund_ids:
             if job.escrow.state != EscrowState.REFUNDED:
@@ -377,11 +382,11 @@ def _apply_capture_not_completed(job: Job, event_type: str, payload: Any) -> boo
         if refunded > 0:
             job.escrow.refunded_amount = _to_amount(job.escrow.refunded_amount) + refunded
         if capture_id:
-            # Deliberately not added to ``refund_ids``: that set is the refunds PACT's
-            # own API initiated, and only those can be reported a second time by this
-            # webhook. A refund seen only through webhooks is counted once per event id
-            # (PayPal retries reuse the event id, which the event store already dedupes).
             job.escrow.refund_id = job.escrow.refund_id or capture_id
+            if event_type == CAPTURE_REFUNDED and capture_id not in job.escrow.refund_ids:
+                # Record the id now that its amount is counted, so the Refund API
+                # returning this same refund later recognises it as already counted.
+                job.escrow.refund_ids = [*job.escrow.refund_ids, capture_id]
         job.escrow.refund_status = status or "REFUNDED"
 
         captured = _to_amount(job.escrow.amount)

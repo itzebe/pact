@@ -719,6 +719,26 @@ class SettlementEngine:
             refund_id = str(body.get("id", ""))
             job.escrow.refund_id = refund_id
             job.escrow.refund_status = status
+            # The provider id is the single source of truth for whether this refund's
+            # amount is already on the books. A webhook may have counted this same
+            # refund while a lost response (or a crash between the provider applying
+            # it and the write) left the row without it; PayPal then returns the same
+            # refund for the same idempotency key, and adding its amount again would
+            # over-report the refund. Advance the sequence regardless, so the *next*
+            # distinct refund still gets a fresh provider key.
+            already_counted = bool(refund_id) and refund_id in job.escrow.refund_ids
+            if already_counted:
+                job.append(
+                    "refund_already_recorded",
+                    "pact",
+                    f"Refund {refund_id} was already recorded (e.g. by its webhook); "
+                    f"not counted again",
+                    refund_id=refund_id,
+                    refunded_total=float(_to_decimal(job.escrow.refunded_amount)),
+                )
+                job.escrow.refund_sequence += 1
+                self._persist(job)
+                return job
             job.escrow.refunded_amount = _to_decimal(job.escrow.refunded_amount) + requested
             job.escrow.refund_sequence += 1
             if refund_id and refund_id not in job.escrow.refund_ids:
