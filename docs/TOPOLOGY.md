@@ -104,7 +104,7 @@ the *same, still-live* id hits the conflict, the `WHERE` makes the update a no-o
 on the same new id serialise on the primary key; the loser re-evaluates the conflict
 after the winner commits, sees a future `expires_at`, and is refused.
 
-`pact/tests/test_ticket_store_postgres.py` proves this with four **separate OS
+`backend/tests/test_ticket_store_postgres.py` proves this with four **separate OS
 processes** racing for one ticket — not threads, not an in-memory double — and
 asserts exactly one `WON`. The ticket lifetime is unchanged at 60 seconds
 (`STREAM_TICKET_TTL`), and the consumed row is stored with that same expiry, so it
