@@ -70,15 +70,21 @@ SET processed_at = now(), outcome = %s
 WHERE event_id = %s
 """
 
-# Bounded, so one call can never delete an unbounded number of rows.
+# Bounded, so one call can never delete an unbounded number of rows. A bare
+# ``DELETE ... LIMIT`` is not valid PostgreSQL; the CTE + ``DELETE ... USING``
+# form is, and ``FOR UPDATE SKIP LOCKED`` partitions the work across concurrent
+# pruners.
 _PRUNE_SQL = """
-DELETE FROM processed_webhooks
-WHERE event_id IN (
+WITH expired AS (
     SELECT event_id FROM processed_webhooks
     WHERE received_at < now() - make_interval(days => %s)
     ORDER BY received_at
     LIMIT %s
+    FOR UPDATE SKIP LOCKED
 )
+DELETE FROM processed_webhooks w
+USING expired e
+WHERE w.event_id = e.event_id
 """
 
 
@@ -144,13 +150,14 @@ class PostgresWebhookStore:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        with self._connect() as conn, conn.cursor() as cur:
+        from .pool import get_pool
+
+        self._pool = get_pool(dsn)
+        with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(WEBHOOK_SCHEMA)
 
     def _connect(self):
-        from .dbstore import _driver
-
-        return _driver().connect(self.dsn, autocommit=True)
+        return self._pool.connection(autocommit=True)
 
     def claim(self, record: WebhookRecord) -> bool:
         """Claim the event id atomically. False means it was already claimed.

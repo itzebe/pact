@@ -52,6 +52,13 @@ DEFAULT_TOKEN_TTL = timedelta(days=30)
 # harvesting from a log or a shared link.
 STREAM_TICKET_TTL = timedelta(seconds=60)
 
+# Issuer and audience for customer access tokens. A *legacy operator token* (minted
+# by ``issue_token`` for scripts) carries neither claim and is still accepted on the
+# strength of its signature; a customer token always carries both and they must
+# match. See ``_decode``.
+TOKEN_ISSUER = "pact"
+TOKEN_AUDIENCE = "pact-api"
+
 
 def stream_scope(job_id: str) -> str:
     """The capability string a stream ticket must carry for ``job_id``."""
@@ -88,6 +95,9 @@ class Principal:
     # The unique id of a stream ticket, used to consume it exactly once. ``None``
     # for an ordinary token.
     ticket_id: str | None = None
+    # The account token version carried by a customer access token (``ver``). ``None``
+    # for a legacy operator token, which has no customer row to version.
+    token_version: int | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -175,7 +185,18 @@ def _decode(token: str) -> dict[str, Any]:
     import jwt
 
     try:
-        return jwt.decode(token, settings.auth.secret, algorithms=[_algorithm()])
+        # ``verify_aud`` is disabled at the library level because a *legacy
+        # operator token* carries no ``aud``/``iss`` claim, and PyJWT raises when a
+        # token has an audience but the verifier was not told which to expect.
+        # Those claims are validated explicitly below instead, so a customer token
+        # is still checked and a legacy token is still accepted. The signature and
+        # expiry are always verified by the library.
+        claims = jwt.decode(
+            token,
+            settings.auth.secret,
+            algorithms=[_algorithm()],
+            options={"verify_aud": False},
+        )
     except HTTPException:
         raise
     except jwt.ExpiredSignatureError as exc:
@@ -192,6 +213,17 @@ def _decode(token: str) -> dict[str, Any]:
         # Covers a bad signature, a malformed token, and an unexpected algorithm.
         raise _unauthorized("Invalid authentication token") from exc
 
+    # When present, the issuer and audience must match this API. A customer access
+    # token always carries them; a legacy operator token carries neither and is
+    # accepted on the strength of its signature alone.
+    issuer = claims.get("iss")
+    if issuer is not None and issuer != TOKEN_ISSUER:
+        raise _unauthorized("Invalid authentication token")
+    audience = claims.get("aud")
+    if audience is not None and audience != TOKEN_AUDIENCE:
+        raise _unauthorized("Invalid authentication token")
+    return claims
+
 
 def _principal_from_claims(claims: dict[str, Any]) -> Principal:
     subject = claims.get("sub")
@@ -202,11 +234,13 @@ def _principal_from_claims(claims: dict[str, Any]) -> Principal:
         raise _unauthorized("Token carries an unknown role")
     scope = claims.get("scope")
     jti = claims.get("jti")
+    ver = claims.get("ver")
     return Principal(
         subject=subject,
         role=role,
         scope=scope if isinstance(scope, str) else None,
         ticket_id=jti if isinstance(jti, str) else None,
+        token_version=ver if isinstance(ver, int) else None,
     )
 
 
@@ -268,6 +302,48 @@ def require_admin(principal: Annotated[Principal, Depends(require_principal)]) -
     """Administrative operations only: reconcile, cancel, delete, global views."""
     if not principal.is_admin:
         raise _forbidden("This action requires an admin credential")
+    return principal
+
+
+def require_verified(principal: Annotated[Principal, Depends(require_principal)]) -> Principal:
+    """A gate for money-bearing operations, layered *on top of* the role gates.
+
+    This never widens access: it only ever adds a refusal to a route that already
+    required a buyer or seller credential. It reads the registered account's
+    authoritative status and token version from the shared store and refuses
+    (503) if that store cannot be reached — a sensitive operation must fail closed.
+
+    A **legacy operator token** whose subject has no customer row is treated as a
+    pre-verified operator credential and passes. This is a deliberate, narrowly
+    scoped exception: it is what keeps the existing operator workflow working, and
+    it is documented in docs/AUTH.md. It does not bypass any role or ownership
+    check, only the email-verification requirement.
+    """
+    from ..core.auth_store import AccountStateError, auth_store
+
+    try:
+        state = auth_store.account_state(principal.subject)
+    except AccountStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Account state is temporarily unavailable; try again shortly.",
+        ) from exc
+
+    if state is None:
+        # No customer row: a legacy operator credential. Pre-verified by
+        # construction; role and ownership checks still apply elsewhere.
+        return principal
+
+    account_status, token_version, email_verified = state
+    if account_status != "active":
+        raise _forbidden("This account is suspended.")
+    if not email_verified:
+        raise _forbidden("Verify your email address before this action.")
+    # A token version mismatch means the token was revoked (password reset,
+    # suspension, or an explicit revocation). Only enforced when the token carries
+    # a version; a legacy operator token has none and is handled above.
+    if principal.token_version is not None and token_version != principal.token_version:
+        raise _forbidden("This credential has been revoked. Sign in again.")
     return principal
 
 

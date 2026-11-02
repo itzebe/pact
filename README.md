@@ -116,7 +116,8 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 294 passed, 38 skipped (the Postgres tests skip themselves).
+# 437 passed, 74 skipped (the Postgres tests skip themselves). The skip count
+# varies with whether the optional psycopg driver is installed.
 python -m pytest tests/ -q
 ```
 
@@ -129,7 +130,7 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 332 passed — nothing skipped.
+# 511 passed — nothing skipped.
 createdb pact                                          # or a Neon/Supabase/RDS URL
 export DATABASE_URL=postgresql://localhost/pact
 python -m pytest tests/ -q
@@ -304,6 +305,24 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/jobs
 The API **fails closed**: with no `PACT_AUTH_SECRET` configured, every protected
 route returns `503` rather than serving without authentication. In the browser,
 the UI asks for a token once and keeps it in local storage.
+
+### Customer accounts (optional, off by default)
+
+On top of the operator-token model there is an opt-in customer-authentication
+subsystem: Argon2id password hashing, 15-minute access tokens, single-use rotating
+refresh tokens (reuse revokes the whole family), a `token_version` for coarse
+revocation, and a crash-safe transactional-email outbox for verification and
+password-reset links. Money-bearing routes (`run`, `approve`, `cancel`, `refund`)
+additionally require a **verified, active** account; an unreachable account store
+fails those routes closed with `503`.
+
+It is **disabled by default** (`PACT_SELF_SERVICE_AUTH` unset → `/api/auth/register`
+is a `404`) because it needs a verified email sending domain before it is useful.
+Enable it only after configuring `PACT_EMAIL_PROVIDER`/`PACT_EMAIL_API_KEY`/
+`PACT_EMAIL_FROM` and `PACT_PUBLIC_URL`, then drain the outbox with
+`python -m scripts.dispatch_email`. See [`docs/AUTH.md`](docs/AUTH.md) for the
+endpoint table, the security decisions, and the threat model. The operator
+experience below needs none of this and works as-is.
 
 See [`docs/AUTH.md`](docs/AUTH.md) for the role model and the threat it addresses.
 

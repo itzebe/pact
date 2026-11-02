@@ -108,6 +108,21 @@ class AuthSettings:
 
     secret: str = field(default_factory=lambda: os.getenv("PACT_AUTH_SECRET", ""))
     algorithm: str = field(default_factory=lambda: os.getenv("PACT_AUTH_ALGORITHM", "HS256"))
+    #: Customer self-service registration. Off by default: it stays disabled
+    #: until an email provider and a verified sending domain are configured, so
+    #: the operator-authenticated experience is the only path until then.
+    self_service_enabled: bool = field(
+        default_factory=lambda: _bool("PACT_SELF_SERVICE_AUTH", False)
+    )
+    #: Access-token lifetime, in minutes. Short so a revocation is bounded; the
+    #: refresh family carries the long-lived session.
+    access_token_ttl_minutes: int = field(
+        default_factory=lambda: int(os.getenv("PACT_ACCESS_TOKEN_TTL_MINUTES", "15"))
+    )
+    #: Refresh-token family lifetime, in days.
+    refresh_token_ttl_days: int = field(
+        default_factory=lambda: int(os.getenv("PACT_REFRESH_TOKEN_TTL_DAYS", "30"))
+    )
 
     @property
     def configured(self) -> bool:
@@ -200,6 +215,34 @@ class Settings:
     # comfortably longer than a PayPal round-trip (see the PayPal client timeout).
     approval_claim_ttl_seconds: int = field(
         default_factory=lambda: int(os.getenv("PACT_APPROVAL_CLAIM_TTL_SECONDS", "120"))
+    )
+
+    # -- email (transactional) --------------------------------------------
+    # None of this is configured by default. Until an owner sets a provider and a
+    # verified sending domain, the outbox records messages as queued and the
+    # dispatcher reports that no provider is configured — it never claims delivery.
+    email_provider: str = field(default_factory=lambda: os.getenv("PACT_EMAIL_PROVIDER", "none"))
+    email_api_key: str = field(default_factory=lambda: os.getenv("PACT_EMAIL_API_KEY", ""))
+    email_from: str = field(default_factory=lambda: os.getenv("PACT_EMAIL_FROM", ""))
+    email_base_url: str = field(default_factory=lambda: os.getenv("PACT_EMAIL_BASE_URL", ""))
+    #: When set, a provider webhook must present this shared secret. Used to move
+    #: a message from accepted to delivered/bounced; never trusted unverified.
+    email_webhook_secret: str = field(default_factory=lambda: os.getenv("PACT_EMAIL_WEBHOOK_SECRET", ""))
+
+    # -- PostgreSQL pool ---------------------------------------------------
+    # A *per-instance* cap. The worst case across a serverless fleet is
+    # ``active function instances x max_size``; budget it against the database
+    # plan (see docs/AUTH.md). A pool is not a global connection limit.
+    pg_pool_max_size: int = field(default_factory=lambda: int(os.getenv("PACT_PG_POOL_MAX_SIZE", "5")))
+    pg_pool_min_size: int = field(default_factory=lambda: int(os.getenv("PACT_PG_POOL_MIN_SIZE", "0")))
+    pg_pool_timeout_seconds: float = field(
+        default_factory=lambda: float(os.getenv("PACT_PG_POOL_TIMEOUT_SECONDS", "5.0"))
+    )
+    pg_pool_max_idle_seconds: float = field(
+        default_factory=lambda: float(os.getenv("PACT_PG_POOL_MAX_IDLE_SECONDS", "300"))
+    )
+    pg_statement_timeout_ms: int = field(
+        default_factory=lambda: int(os.getenv("PACT_PG_STATEMENT_TIMEOUT_MS", "10000"))
     )
 
     @property
