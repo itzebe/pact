@@ -227,7 +227,8 @@ except Exception as exc:  # the refusal we are asserting on
 print("JSON:" + json.dumps(out))
 """
     env = {k: v for k, v in os.environ.items()
-           if k not in {"DATABASE_URL", "PACT_DATA_DIR", "PACT_ENV", "PACT_REQUIRE_REAL_PAYPAL",
+           if k not in {"DATABASE_URL", "DATABASE_URL_UNPOOLED", "PACT_DATA_DIR", "PACT_ENV",
+                        "PACT_REQUIRE_REAL_PAYPAL",
                         "PACT_ALLOW_MOCK_PAYPAL", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
                         "LLM_API_KEY"}}
     env["PYTHONPATH"] = str(BACKEND)
@@ -325,11 +326,30 @@ def test_production_with_valid_postgresql_starts(tmp_path):
     dsn = os.getenv("DATABASE_URL", "")
     if not dsn:
         pytest.skip("DATABASE_URL not set; the valid-Postgres startup test is opt-in")
-    out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data"), "DATABASE_URL": dsn})
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "DATABASE_URL": dsn,
+    })
     assert out["problems"] == [], out["problems"]
     assert out["started"] is True, out["error"]
     assert out["ticket_backend"] == "postgres"
     assert out["ticket_shared"] is True
     assert out["job_backend"] == "postgres"
     assert out["job_durable"] is True
+
+
+def test_production_with_a_neon_style_pooled_dsn_is_accepted(tmp_path):
+    """A Neon ``-pooler`` host must boot: the direct endpoint is derived, not required.
+
+    Production is a Neon pooled endpoint and has no ``DATABASE_URL_UNPOOLED``. Neon
+    documents the direct endpoint as the pooled host with ``-pooler`` removed, so the
+    deployment must not be refused for lacking the variable.
+    """
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "DATABASE_URL": "postgresql://user:pw@ep-x-pooler.c-1.us-east-2.aws.neon.tech/pact",
+    })
+    assert out["problems"] == [], out["problems"]
 

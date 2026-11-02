@@ -161,7 +161,20 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("PACT_DATA_DIR", str(ROOT / "data"))))
     # Postgres is used when set. Serverless platforms have no durable disk, so a
     # connection string is the only way the ledger survives there.
+    #
+    # DATABASE_URL is the *pooled* endpoint (e.g. Neon's "-pooler" host, which is
+    # PgBouncer in transaction mode). It is correct for ordinary request/response
+    # queries, where every operation is short and self-contained.
     database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+    # DATABASE_URL_UNPOOLED is the *direct* endpoint (the same host without the
+    # "-pooler" suffix). Session-scoped work — the settlement advisory lock — must
+    # use it, because a transaction-mode pooler hands each client a different
+    # server connection per transaction, so a session lock is released between
+    # statements and silently stops protecting the settlement. Never the pooled
+    # DSN for that work (see core.pool.DatabasePool.direct).
+    database_url_unpooled: str = field(
+        default_factory=lambda: os.getenv("DATABASE_URL_UNPOOLED", "")
+    )
     # Mock PayPal is OFF by default. A mock settlement moves no money, so a
     # deployment that silently used it would report payments that never happened.
     # Development turns it on explicitly; production leaves it off.
@@ -244,6 +257,28 @@ class Settings:
     pg_statement_timeout_ms: int = field(
         default_factory=lambda: int(os.getenv("PACT_PG_STATEMENT_TIMEOUT_MS", "10000"))
     )
+
+    @property
+    def settlement_database_url(self) -> str:
+        """The DSN session-scoped work must use: a direct endpoint, never pooled.
+
+        Prefers an explicit ``DATABASE_URL_UNPOOLED``; when only the pooled
+        ``DATABASE_URL`` is set it derives the direct endpoint from a Neon-style
+        ``-pooler`` host, which is what Neon documents (the direct host is the pooled
+        host with the ``-pooler`` label removed). ``pool.direct()`` verifies the
+        result with a live probe before holding a session lock, so a wrong guess is
+        refused rather than used. Never returns the pooled DSN when that DSN is
+        actually pooled — see ``pool.direct()``, which fails loudly instead.
+        """
+        explicit = self.database_url_unpooled.strip()
+        if explicit:
+            return explicit
+        pooled = self.database_url.strip()
+        if not pooled:
+            return ""
+        from .core.pool import derive_direct_dsn
+
+        return derive_direct_dsn(pooled) or pooled
 
     @property
     def is_production(self) -> bool:

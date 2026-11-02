@@ -160,6 +160,7 @@ can see.
 | One buyer reading every tenant's jobs and ledger | `/api/jobs` and `/api/ledger` are filtered by the caller's role and ownership. |
 | An oversized body exhausting memory before validation | A 64 KB content-length cap is enforced before the body is parsed. |
 | Duplicate capture from concurrent requests | The job is claimed atomically (a lease on the filesystem store, an advisory lock on Postgres) before any provider call. |
+| The settlement advisory lock being defeated by a transaction-mode pooler | The lock runs on the direct endpoint (`DATABASE_URL_UNPOOLED`), never the pooled one; `pool.direct()` refuses a `-pooler` host or an endpoint whose live probe shows a second connection can take the same session lock. |
 | Credential stuffing / password brute force | Login is rate-limited per identifier (8 failures / 15 min), and the throttle refuses even a correct password once tripped. |
 | Account enumeration via register/reset | Both return an identical response whether or not the address exists. |
 | A stolen refresh token being reused | Refresh tokens rotate; presenting a spent one revokes the whole family. |

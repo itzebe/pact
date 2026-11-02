@@ -553,6 +553,27 @@ def test_runtime_validation_is_quiet_for_a_sound_production_deployment():
     assert sound.validate_runtime() == []
 
 
+def test_a_neon_style_pooled_database_resolves_a_direct_settlement_endpoint():
+    """A Neon ``-pooler`` host must resolve to the direct host for settlement locks."""
+    import dataclasses
+
+    from pact.config import AuthSettings, Settings
+
+    pooled = Settings(
+        auth=AuthSettings(secret="a-sufficiently-long-random-secret-value"),
+        environment="production",
+        allow_mock_paypal=False,
+        paypal=dataclasses.replace(settings.paypal, client_id="id", client_secret="secret"),
+        database_url="postgresql://user:pw@ep-x-pooler.c-1.us-east-2.aws.neon.tech/pact",
+    )
+    # No DATABASE_URL_UNPOOLED is set, so the direct host is derived from the pooled
+    # one — the same edit Neon documents (drop the "-pooler" label).
+    assert pooled.settlement_database_url == (
+        "postgresql://user:pw@ep-x.c-1.us-east-2.aws.neon.tech/pact"
+    )
+    assert pooled.validate_runtime() == []
+
+
 def test_runtime_validation_flags_a_production_deployment_without_a_database():
     """A production deployment with no shared database loses instance safety silently."""
     import dataclasses
