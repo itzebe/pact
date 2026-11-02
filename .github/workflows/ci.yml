@@ -87,6 +87,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq pgbouncer
+          # The package ships its own pgbouncer instance (md5 auth, no "pact" user)
+          # and starts it on 6432. If it keeps that port our instance cannot bind and
+          # the packaged one answers instead, rejecting the password. Stop it first.
+          sudo systemctl stop pgbouncer 2>/dev/null || true
+          sudo systemctl disable pgbouncer 2>/dev/null || true
+          sudo pkill -x pgbouncer 2>/dev/null || true
+          sleep 1
           # PgBouncer refuses to run as root, so run it as the runner user with a
           # config it owns. Only the package install needs sudo.
           PGB_DIR="$(mktemp -d)"
@@ -107,14 +114,19 @@ jobs:
           logfile = $PGB_DIR/pgbouncer.log
           unix_socket_dir = $PGB_DIR
           INI
-          pgbouncer -d "$PGB_DIR/pgbouncer.ini"
+          pgbouncer -d "$PGB_DIR/pgbouncer.ini" || { cat "$PGB_DIR/pgbouncer.log"; exit 1; }
           for i in $(seq 1 20); do
             if python -c "import psycopg,sys; psycopg.connect('$PGBOUNCER_URL', connect_timeout=3).close()" 2>/dev/null; then
               echo "PgBouncer is accepting connections"; break
             fi
             sleep 1
           done
-          python -c "import psycopg; psycopg.connect('$PGBOUNCER_URL', connect_timeout=3).close(); print('pooled endpoint reachable')"
+          if ! python -c "import psycopg; psycopg.connect('$PGBOUNCER_URL', connect_timeout=3).close()"; then
+            echo "::error::PgBouncer did not accept a connection on the pooled endpoint"
+            cat "$PGB_DIR/pgbouncer.log" || true
+            exit 1
+          fi
+          echo "pooled endpoint reachable"
 
       - name: Run the backend test suite
         working-directory: backend
