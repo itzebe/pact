@@ -342,8 +342,16 @@ instances may serve the same job. Two things follow, and both are handled:
   `"durable": false` and the ledger is lost on cold start.
 - **Settlement must be instance-safe.** On Postgres the store takes a session
   advisory lock per job and re-reads the authoritative row inside it, so two
-  instances cannot both capture the same authorization. The filesystem store
-  cannot do this; its `threading.RLock` only protects one process.
+  instances cannot both capture the same authorization. The lock is a *session*
+  lock, so it must not run through a transaction-mode pooler (Neon's `-pooler`
+  host, PgBouncer), which hands the server connection back after every
+  transaction and releases the lock between statements. Pact therefore holds it on
+  a direct connection: `DATABASE_URL_UNPOOLED` when set, or — when `DATABASE_URL`
+  is a Neon-style `-pooler` host — the direct host derived from it (the pooled host
+  with `-pooler` removed, which is the edit Neon documents). `pool.direct()`
+  verifies the endpoint with a live probe and refuses one that behaves like a
+  pooler, so the guard cannot silently degrade. The filesystem store cannot do any
+  of this; its `threading.RLock` only protects one process.
 - **Single-use state must be shared too.** The consumed-SSE-ticket registry also
   moves into Postgres, so a captured stream URL cannot be replayed against a
   different instance. In production `DATABASE_URL` is required, so the registry is
@@ -359,6 +367,10 @@ routes `/api/*` to the FastAPI function in `api/index.py`.
    framework preset as **Other**; `vercel.json` supplies the commands.
 2. Create a Postgres database and add its pooled connection string as the
    `DATABASE_URL` environment variable for Production, Preview, and Development.
+   On Neon that pooled string is enough: the direct endpoint the settlement lock
+   needs is derived from it. If your provider's pooler host does not carry a
+   recognizable label (or you are not on Neon), also set `DATABASE_URL_UNPOOLED` to
+   the direct, unpooled endpoint.
 3. Add `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` (sandbox) and, optionally,
    `LLM_API_KEY` and `LLM_MODEL`. Without PayPal credentials the escrow runs
    against the in-memory double and the UI labels it "Simulated PayPal".
