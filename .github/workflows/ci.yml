@@ -87,23 +87,27 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq pgbouncer
-          printf '%s\n' '"pact" "pact"' | sudo tee /etc/pgbouncer/userlist.txt >/dev/null
-          sudo tee /etc/pgbouncer/pgbouncer.ini >/dev/null <<'INI'
+          # PgBouncer refuses to run as root, so run it as the runner user with a
+          # config it owns. Only the package install needs sudo.
+          PGB_DIR="$(mktemp -d)"
+          printf '%s\n' '"pact" "pact"' > "$PGB_DIR/userlist.txt"
+          cat > "$PGB_DIR/pgbouncer.ini" <<INI
           [databases]
           pact = host=127.0.0.1 port=5432 dbname=pact
           [pgbouncer]
           listen_addr = 127.0.0.1
           listen_port = 6432
           auth_type = plain
-          auth_file = /etc/pgbouncer/userlist.txt
+          auth_file = $PGB_DIR/userlist.txt
           pool_mode = transaction
           max_client_conn = 200
           default_pool_size = 10
           ignore_startup_parameters = extra_float_digits,options
-          pidfile = /tmp/pgbouncer.pid
-          logfile = /tmp/pgbouncer.log
+          pidfile = $PGB_DIR/pgbouncer.pid
+          logfile = $PGB_DIR/pgbouncer.log
+          unix_socket_dir = $PGB_DIR
           INI
-          sudo pgbouncer -d /etc/pgbouncer/pgbouncer.ini
+          pgbouncer -d "$PGB_DIR/pgbouncer.ini"
           for i in $(seq 1 20); do
             if python -c "import psycopg,sys; psycopg.connect('$PGBOUNCER_URL', connect_timeout=3).close()" 2>/dev/null; then
               echo "PgBouncer is accepting connections"; break
