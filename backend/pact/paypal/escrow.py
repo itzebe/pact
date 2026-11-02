@@ -130,12 +130,25 @@ class PayPalEscrowClient:
         client_secret: str | None = None,
         *,
         environment: str | None = None,
+        base_url: str | None = None,
+        webhook_id: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         self.client_id = client_id if client_id is not None else settings.paypal.client_id
         self.client_secret = client_secret if client_secret is not None else settings.paypal.client_secret
         self.environment = (environment or settings.paypal.environment).lower()
-        self.base_url = "https://api-m.paypal.com" if self.environment == "live" else "https://api-m.sandbox.paypal.com"
+        # An explicit base_url wins; otherwise a configured override is honoured so a
+        # test or an internal proxy can be pointed at; otherwise the host follows the
+        # environment this client was constructed with.
+        if base_url is not None:
+            self.base_url = base_url.rstrip("/")
+        elif settings.paypal.base_url_override:
+            self.base_url = settings.paypal.base_url_override
+        elif self.environment == "live":
+            self.base_url = "https://api-m.paypal.com"
+        else:
+            self.base_url = "https://api-m.sandbox.paypal.com"
+        self.webhook_id = webhook_id if webhook_id is not None else settings.paypal.webhook_id
         self._timeout = timeout
         self._token: str | None = None
         self._token_expiry: float = 0.0
@@ -358,6 +371,75 @@ class PayPalEscrowClient:
             currency=str(amount.get("currency_code", "")),
             raw=body,
         )
+
+    # -------------------------------------------------------------- webhooks
+
+    @property
+    def can_verify_webhooks(self) -> bool:
+        """Whether signature verification is possible at all.
+
+        It needs a webhook id (what PayPal signs against) and credentials (to call
+        the verify endpoint). With either missing, no webhook may be trusted, and a
+        caller must refuse rather than accept an unverifiable payload.
+        """
+        return bool(self.webhook_id and self.configured)
+
+    def verify_webhook_signature(self, headers: dict[str, str], event: dict) -> bool:
+        """Ask PayPal whether a webhook event really came from it.
+
+        PayPal's ``POST /v1/notifications/verify-webhook-signature`` is the
+        authoritative check: it recomputes the signature over the transmission
+        headers plus the webhook id and compares. This is deliberately a *server-side
+        verification call* rather than a local HMAC computation, because the local
+        path depends on the exact header set and body bytes PayPal used, which is
+        easy to get subtly wrong in a way that fails open.
+
+        Returns False (never raises) when the event cannot be verified, so a caller
+        cannot accidentally treat an unverifiable payload as authentic. A transport
+        failure also returns False: an unverified event must never change money
+        state, and a retry will arrive again.
+        """
+        if not self.can_verify_webhooks:
+            log.error(
+                "Cannot verify a PayPal webhook: PAYPAL_WEBHOOK_ID or credentials are "
+                "not configured; refusing the event"
+            )
+            return False
+
+        required = {
+            "paypal-transmission-id": headers.get("paypal-transmission-id")
+            or headers.get("Paypal-Transmission-Id"),
+            "paypal-transmission-time": headers.get("paypal-transmission-time")
+            or headers.get("Paypal-Transmission-Time"),
+            "paypal-cert-url": headers.get("paypal-cert-url") or headers.get("Paypal-Cert-Url"),
+            "paypal-auth-algo": headers.get("paypal-auth-algo") or headers.get("Paypal-Auth-Algo"),
+            "paypal-transmission-sig": headers.get("paypal-transmission-sig")
+            or headers.get("Paypal-Transmission-Sig"),
+        }
+        if any(not v for v in required.values()):
+            log.warning("Rejecting a webhook missing one or more PayPal signature headers")
+            return False
+
+        payload = {
+            "auth_algo": required["paypal-auth-algo"],
+            "cert_url": required["paypal-cert-url"],
+            "transmission_id": required["paypal-transmission-id"],
+            "transmission_sig": required["paypal-transmission-sig"],
+            "transmission_time": required["paypal-transmission-time"],
+            "webhook_id": self.webhook_id,
+            "webhook_event": event,
+        }
+        try:
+            body = self._request(
+                "POST", "/v1/notifications/verify-webhook-signature", json_body=payload
+            )
+        except PayPalError as exc:
+            # A timeout or 5xx here is not proof the event is forged; it is proof we
+            # cannot decide. Returning False keeps the event from changing state, and
+            # PayPal retries, so the safe answer costs nothing but a delay.
+            log.error("Could not verify a webhook signature (%s); refusing the event", type(exc).__name__)
+            return False
+        return str(body.get("verification_status", "")).upper() == "SUCCESS"
 
 
 def _safe_json(response: httpx.Response) -> Any:

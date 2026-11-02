@@ -19,14 +19,75 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# PayPal's two API hosts. The sandbox host is the only one this project should ever
+# talk to during sandbox work; the live host moves real money.
+PAYPAL_SANDBOX_HOST = "api-m.sandbox.paypal.com"
+PAYPAL_LIVE_HOST = "api-m.paypal.com"
+
+
+def _is_local_or_sandbox_host(url: str) -> bool:
+    """Whether an API base is the sandbox host or a loopback/private test host.
+
+    Used by the sandbox-only guard. A test double or an on-prem proxy is not
+    production money, so it is allowed; anything else — the live PayPal host, or a
+    host someone forgot they pointed at — is treated as live and refused when the
+    guard is on.
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+    if host in {PAYPAL_SANDBOX_HOST, "www.sandbox.paypal.com", "sandbox.paypal.com"}:
+        return True
+    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+        return True
+    # RFC1918 / link-local / CGNAT: a private network host is a test or an internal
+    # mock, never PayPal's production endpoint.
+    if host.startswith(("10.", "192.168.", "169.254.")):
+        return True
+    if host.startswith("172."):
+        try:
+            second = int(host.split(".")[1])
+        except (IndexError, ValueError):
+            return False
+        return 16 <= second <= 31
+    return False
+
+
 @dataclass(frozen=True)
 class PayPalSettings:
     client_id: str = field(default_factory=lambda: os.getenv("PAYPAL_CLIENT_ID", ""))
     client_secret: str = field(default_factory=lambda: os.getenv("PAYPAL_CLIENT_SECRET", ""))
     environment: str = field(default_factory=lambda: os.getenv("PAYPAL_ENVIRONMENT", "sandbox").lower())
+    # Webhook id of the endpoint registered in the PayPal developer dashboard. It is
+    # what PayPal signs against, so signature verification cannot proceed without it.
+    # Not a secret: it identifies the endpoint, it does not authorise anything.
+    webhook_id: str = field(default_factory=lambda: os.getenv("PAYPAL_WEBHOOK_ID", "").strip())
+    # Optional explicit API base. Used to point at a local mock or a proxy in tests.
+    # It is *validated* rather than trusted: ``sandbox_only`` refuses a live host.
+    base_url_override: str = field(default_factory=lambda: os.getenv("PAYPAL_BASE_URL", "").rstrip("/"))
+    # When set, a live (production) PayPal host is refused outright. This is the
+    # switch that makes "sandbox only" a property of the process rather than a
+    # convention, so an accidental production credential cannot move real money.
+    sandbox_only: bool = field(default_factory=lambda: _bool("PACT_PAYPAL_SANDBOX_ONLY", False))
+
+    @property
+    def is_live(self) -> bool:
+        """Whether this configuration resolves to PayPal's production host.
+
+        An explicit ``PAYPAL_BASE_URL`` that is not the sandbox host counts as live
+        unless it is a loopback/private host used by tests, so an override cannot be
+        used to slip past the sandbox-only guard.
+        """
+        if self.base_url_override:
+            return not _is_local_or_sandbox_host(self.base_url_override)
+        return self.environment == "live"
 
     @property
     def base_url(self) -> str:
+        if self.base_url_override:
+            return self.base_url_override
         if self.environment == "live":
             return "https://api-m.paypal.com"
         return "https://api-m.sandbox.paypal.com"
@@ -156,6 +217,15 @@ class Settings:
         if self.public_url and not self.public_url.startswith(("http://", "https://")):
             problems.append(
                 f"PACT_PUBLIC_URL must be an absolute http(s) URL, got {self.public_url!r}"
+            )
+        # A sandbox-only deployment must never be pointed at PayPal's production host.
+        # This is checked for every environment, not just production: the whole point
+        # is to make an accidental live credential impossible to use, and a developer
+        # laptop with live credentials is exactly the accident being prevented.
+        if self.paypal.sandbox_only and self.paypal.is_live:
+            problems.append(
+                "PACT_PAYPAL_SANDBOX_ONLY is set but the PayPal configuration resolves "
+                "to a live host; refusing to talk to production PayPal"
             )
         if self.is_production:
             if not self.auth.configured:

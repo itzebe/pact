@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, getToken, money, setToken, streamJob } from './lib/api'
+import { api, getToken, money, pollJob, setToken, streamJob } from './lib/api'
 import { displayStatus } from './lib/status'
 import {
   Empty,
@@ -12,6 +12,7 @@ import {
 } from './components/primitives'
 import Composer from './components/Composer'
 import Negotiation from './components/Negotiation'
+import PaymentStatus from './components/PaymentStatus'
 import Verification, { EscrowRecord } from './components/Verification'
 import Ledger from './components/Ledger'
 import Reputation from './components/Reputation'
@@ -172,6 +173,26 @@ export default function App() {
     }
   }, [job, refreshLists])
 
+  // A webhook or a reconciliation can move the payment on the server with no browser
+  // action, and no SSE stream may be open. When the job is in a state that can still
+  // change, poll it a bounded number of times so the panel does not show a stale
+  // "held". Terminal states stop the poll immediately.
+  const applyServerJob = useCallback((updated) => {
+    setJob(updated)
+    setLiveEntries(updated.ledger ?? [])
+  }, [])
+
+  const refreshJob = useCallback(async () => {
+    if (!job) return
+    await pollJob(job.id, {
+      attempts: 6,
+      intervalMs: 2000,
+      onUpdate: applyServerJob,
+      isDone: (j) => ['released', 'voided', 'refunded', 'none'].includes(j?.escrow?.state),
+    })
+    await refreshLists()
+  }, [job, applyServerJob, refreshLists])
+
   const viewJob = useMemo(
     () => (job ? { ...job, ledger: liveEntries.length ? liveEntries : job.ledger } : null),
     [job, liveEntries],
@@ -212,50 +233,27 @@ export default function App() {
             </div>
           </div>
         )}
-        {job?.escrow?.state === 'awaiting_approval' && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
-            <div>
-              <div className="text-sm font-medium text-held">Buyer approval required</div>
-              <div className="mt-0.5 text-xs text-paper-dim">
-                PayPal will not authorize this order until the buyer approves it. Nothing is held
-                and no work is produced until then.
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {job.escrow.approval_url && (
-                <a
-                  href={job.escrow.approval_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="chip ring-1 bg-ink-800 text-paper-dim ring-ink-600 hover:text-paper"
-                >
-                  Open PayPal approval
-                </a>
-              )}
-              <button
-                onClick={approve}
-                disabled={busy}
-                className="chip ring-1 bg-paypal-deep/50 text-paypal-bright ring-paypal/40 disabled:opacity-50"
-              >
-                {busy ? 'Continuing…' : 'I approved — continue'}
-              </button>
-            </div>
+        {job?.escrow && (
+          <div className="mb-5">
+            <PaymentStatus
+              job={viewJob}
+              busy={busy}
+              approvalUrl={job.escrow.approval_url}
+              onApprove={approve}
+              onReconcile={reconcile}
+            />
           </div>
         )}
 
-        {job?.status === 'unresolved' && (
-          <div className="mb-5 rounded-xl border border-held/40 bg-held-dim/40 px-4 py-3">
-            <div className="text-sm font-medium text-held">Settlement unresolved</div>
-            <div className="mt-0.5 text-xs text-paper-dim">
-              PayPal did not confirm a terminal outcome, so Pact has recorded neither a release nor
-              a return. This needs reconciliation rather than a retry — a retry could capture twice.
-            </div>
+        {job?.escrow && !['released', 'voided', 'refunded', 'none'].includes(job.escrow.state) && (
+          <div className="mb-5 flex justify-end">
             <button
+              onClick={refreshJob}
               disabled={busy}
-              onClick={reconcile}
-              className="chip mt-3 ring-1 bg-paypal-deep/50 text-paypal-bright ring-paypal/40 disabled:opacity-50"
+              className="chip ring-1 bg-ink-800 text-paper-faint ring-ink-600 hover:text-paper disabled:opacity-50"
+              title="Re-read this payment from the server. A webhook or an operator may have moved it."
             >
-              {busy ? 'Reconciling…' : 'Reconcile with PayPal'}
+              Refresh payment status
             </button>
           </div>
         )}

@@ -7,7 +7,9 @@ on:
   pull_request:
     branches: [master]
   push:
-    branches: [security/pact-prelaunch-hardening]
+    branches:
+      - security/pact-prelaunch-hardening
+      - feat/paypal-webhooks-refund-reconciliation
 
 # Least privilege: these jobs only read the repository. No job needs a token that
 # can write, and none is given one.
@@ -77,13 +79,15 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/ -q
 
-      # Prove the Postgres integration tests actually ran. ``test_postgres_store``
-      # and ``test_ticket_store_postgres`` are the cross-instance safety net; a
-      # skip means that net is not deployed, which is a failure, not a pass.
+      # Prove the Postgres integration tests actually ran. ``test_postgres_store``,
+      # ``test_ticket_store_postgres``, ``test_webhook_postgres`` and
+      # ``test_webhook_persistence`` are the cross-instance safety net; a skip means
+      # that net is not deployed, which is a failure, not a pass.
       - name: Assert the PostgreSQL tests were not skipped
         working-directory: backend
         run: |
           python -m pytest tests/test_postgres_store.py tests/test_ticket_store_postgres.py \
+            tests/test_webhook_postgres.py tests/test_webhook_persistence.py \
             -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
           cat pg-tests.log
           if grep -Eq "[0-9]+ skipped" pg-tests.log; then
@@ -94,6 +98,46 @@ jobs:
       - name: Lint with pyflakes
         working-directory: backend
         run: python -m pyflakes pact/ scripts/
+
+      # The production incident this guards against: the root ``pyproject.toml``
+      # (what Vercel's Python runtime installs from, via ``uv.lock``) silently drifted
+      # from the real dependency set and omitted PyJWT. The image built fine and every
+      # authenticated request then raised ModuleNotFoundError. A dependency declared in
+      # one manifest but missing from another is a deployment break, so it fails here.
+      - name: Assert the dependency manifests agree
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys, tomllib
+
+          def names_from_pyproject(path):
+              data = tomllib.loads(pathlib.Path(path).read_text())
+              deps = data.get("project", {}).get("dependencies", [])
+              return {re.split(r"[<>=!\[; ]", spec)[0].strip().lower() for spec in deps}
+
+          def names_from_requirements(path):
+              out = set()
+              for line in pathlib.Path(path).read_text().splitlines():
+                  line = line.split("#", 1)[0].strip()
+                  if line:
+                      out.add(re.split(r"[<>=!\[; ]", line)[0].strip().lower())
+              return out
+
+          backend = names_from_pyproject("backend/pyproject.toml")
+          root = names_from_pyproject("pyproject.toml")
+          reqs = names_from_requirements("requirements.txt")
+
+          # uvicorn is a runtime server dependency the Vercel function does not need
+          # (Vercel provides its own server), so it is expected only in the Docker
+          # requirements file and the backend manifest.
+          backend_runtime = backend - {"uvicorn"}
+          missing_root = backend_runtime - root
+          missing_reqs = backend_runtime - reqs
+          if missing_root:
+              sys.exit(f"root pyproject.toml is missing runtime deps: {sorted(missing_root)}")
+          if missing_reqs:
+              sys.exit(f"requirements.txt is missing runtime deps: {sorted(missing_reqs)}")
+          print(f"manifests agree on {len(backend_runtime)} runtime dependencies")
+          PY
 
   frontend:
     name: Frontend (Node 20)

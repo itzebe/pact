@@ -4,6 +4,13 @@
 # psycopg is included because Vercel has no durable disk, so the ledger must live
 # in an external Postgres (set DATABASE_URL). Without it the app still runs, but
 # only with non-durable storage.
+#
+# PyJWT is required: the API verifies bearer tokens on every protected route, and
+# `jwt` is imported there. Omitting it from *this* file is what broke production
+# once already — the Vercel runtime installs from here (via uv.lock), so a
+# dependency declared only in backend/pyproject.toml or requirements.txt is absent
+# from the deployed function, and every authenticated request raises
+# ModuleNotFoundError. Keep all three files in sync.
 [project]
 name = "pact"
 version = "0.1.0"
@@ -14,5 +21,6 @@ dependencies = [
     "pydantic>=2.9",
     "python-dotenv>=1.0",
     "sse-starlette>=2.1",
+    "PyJWT>=2.8",
     "psycopg[binary]>=3.2",
 ]

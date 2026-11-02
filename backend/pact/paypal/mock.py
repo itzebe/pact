@@ -32,6 +32,9 @@ class MockPayPalEscrowClient:
 
     environment = "mock"
     auto_approves = True
+    # The double has no webhook id and never receives a signed delivery, so it cannot
+    # verify one. The webhook route refuses with 503 rather than pretending to check.
+    can_verify_webhooks = False
 
     def __init__(self) -> None:
         self._orders: dict[str, dict[str, Any]] = {}
@@ -41,6 +44,10 @@ class MockPayPalEscrowClient:
     @property
     def configured(self) -> bool:
         return True
+
+    def verify_webhook_signature(self, headers: dict[str, str], event: dict) -> bool:
+        """A simulated deployment can never authenticate a real webhook."""
+        return False
 
     # ------------------------------------------------------------- lifecycle
 
@@ -151,15 +158,30 @@ class MockPayPalEscrowClient:
         capture = self._captures.get(capture_id)
         if capture is None:
             raise PayPalError(f"Unknown capture {capture_id}", code="RESOURCE_NOT_FOUND")
+
+        # Enforce the same cap PayPal does: the sum of refunds against a capture can
+        # never exceed what was captured. A partial refund accumulates; only when the
+        # full amount is refunded does the capture read as REFUNDED.
+        captured = Decimal(capture["amount"]["value"])
+        already = Decimal(capture.get("refunded_value", "0.00"))
+        requested = Decimal(money(amount)) if amount is not None else (captured - already)
+        if requested <= 0:
+            raise PayPalError("Refund amount must be positive", code="INVALID_REFUND_AMOUNT")
+        if already + requested > captured:
+            raise PayPalError(
+                "Cannot refund more than the captured amount", code="REFUND_AMOUNT_EXCEEDED"
+            )
+
         refund_id = f"MOCK-REFUND-{uuid.uuid4().hex[:12].upper()}"
         refund = {
             "id": refund_id,
             "status": "COMPLETED",
             "amount": {"currency_code": currency or capture["amount"]["currency_code"],
-                       "value": money(amount) if amount is not None else capture["amount"]["value"]},
+                       "value": money(requested)},
             "mock": True,
         }
-        capture["status"] = "REFUNDED"
+        capture["refunded_value"] = money(already + requested)
+        capture["status"] = "REFUNDED" if already + requested >= captured else "PARTIALLY_REFUNDED"
         return refund
 
     def get_order(self, order_id: str) -> dict:

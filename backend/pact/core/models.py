@@ -107,6 +107,20 @@ class EscrowRecord(BaseModel):
     capture_id: str = ""
     capture_status: str = ""
     refund_id: str = ""
+    refund_status: str = ""
+    # Cumulative amount refunded against this capture. Partial refunds accumulate, so
+    # the sum can never exceed ``amount``; ``refund_sequence`` counts *confirmed*
+    # refund operations and is what makes each refund's idempotency key distinct
+    # while a retry of the same call reuses one.
+    refunded_amount: Decimal = Decimal("0")
+    refund_sequence: int = 0
+    # Provider refund ids already counted in ``refunded_amount``, whichever path
+    # counted them first. PACT's own Refund API and PayPal's
+    # ``PAYMENT.CAPTURE.REFUNDED`` webhook are two notifications of the *same* refund,
+    # so whichever records it first marks the id here and the other must not add the
+    # amount again — otherwise a partial refund reads as a full reversal, or a lost
+    # response followed by a retry double-counts.
+    refund_ids: list[str] = Field(default_factory=list)
     amount: Decimal = Decimal("0")
     currency: str = "USD"
     state: EscrowState = EscrowState.NONE
