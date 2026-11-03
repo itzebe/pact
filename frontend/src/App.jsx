@@ -473,10 +473,10 @@ function Header({ health, live, guest, onDisconnect }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {guest && (
             <span
-              className="chip bg-ink-800 text-paper-faint ring-1 ring-ink-600"
+              className="chip hidden bg-ink-800 text-paper-faint ring-1 ring-ink-600 sm:inline-flex"
               title="You are in a private guest workspace. Your jobs, payments and ledger are visible only to this browser session."
             >
               Guest workspace
