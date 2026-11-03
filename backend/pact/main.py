@@ -109,7 +109,10 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    # X-CSRF-Token must be allowed so a cross-origin caller (a local dev frontend
+    # pointed at a deployed API) can complete the double-submit handshake. Same-origin
+    # requests never preflight, so this widens nothing for the production app.
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 app.include_router(public_router)

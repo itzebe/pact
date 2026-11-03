@@ -51,6 +51,7 @@ export function paymentStatus(job) {
           'The order is created but nothing is held and no work starts until you approve it. Returning to this page does not by itself settle anything.',
         settled: false,
         action: 'approve',
+        refundable: false,
       }
     case 'held':
       return {
@@ -61,6 +62,7 @@ export function paymentStatus(job) {
           'PayPal has authorized the amount. The seller is committed; you have not been charged. It is captured only if the delivery passes verification.',
         settled: false,
         action: null,
+        refundable: false,
       }
     case 'released':
       // A partial refund leaves the escrow `released`: some money moved back but the
@@ -73,6 +75,10 @@ export function paymentStatus(job) {
           detail: `${refunded} of ${amount} ${currency} has been refunded to the buyer; the seller keeps the remainder of the captured payment.`,
           settled: !simulated,
           action: null,
+          // The remainder is still refundable; the settlement engine caps the amount
+          // at the captured total and deduplicates repeat requests.
+          refundable: amount - refunded > 0,
+          refundableAmount: amount - refunded,
         }
       }
       return {
@@ -84,6 +90,8 @@ export function paymentStatus(job) {
           : 'PayPal confirmed the capture. The seller has been paid from the authorized funds.',
         settled: !simulated,
         action: null,
+        refundable: amount > 0,
+        refundableAmount: amount,
       }
     case 'refunded':
       return {
@@ -93,6 +101,7 @@ export function paymentStatus(job) {
         detail: 'The captured payment was reversed. The buyer has been made whole.',
         settled: false,
         action: null,
+        refundable: false,
       }
     case 'voided':
       return {
@@ -102,6 +111,7 @@ export function paymentStatus(job) {
         detail: 'The hold was released without a capture. The buyer was charged nothing.',
         settled: false,
         action: null,
+        refundable: false,
       }
     case 'unresolved':
       return {
@@ -112,6 +122,7 @@ export function paymentStatus(job) {
           'PayPal did not confirm a terminal outcome, so this is recorded as neither paid nor returned. A retry could capture twice, so it must be reconciled against PayPal.',
         settled: false,
         action: 'reconcile',
+        refundable: false,
       }
     case 'none':
     default:
@@ -122,6 +133,7 @@ export function paymentStatus(job) {
         detail: 'No escrow has been opened for this settlement.',
         settled: false,
         action: null,
+        refundable: false,
       }
   }
 }

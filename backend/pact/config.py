@@ -71,6 +71,20 @@ class PayPalSettings:
     # switch that makes "sandbox only" a property of the process rather than a
     # convention, so an accidental production credential cannot move real money.
     sandbox_only: bool = field(default_factory=lambda: _bool("PACT_PAYPAL_SANDBOX_ONLY", False))
+    # A PayPal *Sandbox* personal (buyer) account a guest can use to complete the
+    # order-approval step. PayPal requires the buyer to approve an order before it can
+    # be authorized, and a public judge has no sandbox account of their own, so
+    # without one the flow stops at "buyer approval required". This is a test account
+    # on the sandbox host: it moves no real money. It is surfaced *only* to a guest
+    # session on a sandbox deployment (see ``api.auth_routes``), never to an
+    # unauthenticated caller and never when the host is live, so it cannot leak from a
+    # deployment that moves real money. Leave unset to hide the hint.
+    sandbox_buyer_email: str = field(
+        default_factory=lambda: os.getenv("PAYPAL_SANDBOX_BUYER_EMAIL", "").strip()
+    )
+    sandbox_buyer_password: str = field(
+        default_factory=lambda: os.getenv("PAYPAL_SANDBOX_BUYER_PASSWORD", "")
+    )
 
     @property
     def is_live(self) -> bool:
@@ -122,6 +136,32 @@ class AuthSettings:
     #: Refresh-token family lifetime, in days.
     refresh_token_ttl_days: int = field(
         default_factory=lambda: int(os.getenv("PACT_REFRESH_TOKEN_TTL_DAYS", "30"))
+    )
+    #: Guest (judge) sessions. When enabled, a first-time visitor is given a
+    #: server-managed guest workspace with no credentials to supply, so the
+    #: deployed product can be evaluated end to end. Off by default: a deployment
+    #: that does not want anonymous traffic must not silently start serving it.
+    guests_enabled: bool = field(
+        default_factory=lambda: _bool("PACT_GUEST_SESSIONS", False)
+    )
+    #: Guest session lifetime, in hours. Bounds how long an unattended workspace
+    #: lives; the cookie carries the same expiry.
+    guest_session_ttl_hours: int = field(
+        default_factory=lambda: int(os.getenv("PACT_GUEST_SESSION_TTL_HOURS", "12"))
+    )
+    #: How many jobs one guest workspace may create. A ceiling on how much of the
+    #: shared (real, sandbox) payment rail a single visitor can exercise.
+    guest_max_jobs: int = field(
+        default_factory=lambda: int(os.getenv("PACT_GUEST_MAX_JOBS", "8"))
+    )
+    #: New guest workspaces allowed per client IP within the window. Bounds
+    #: workspace creation (and therefore database rows and sandbox orders) from a
+    #: single source without hindering an ordinary evaluation.
+    guest_new_per_ip: int = field(
+        default_factory=lambda: int(os.getenv("PACT_GUEST_NEW_PER_IP", "30"))
+    )
+    guest_new_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_GUEST_NEW_WINDOW_SECONDS", "3600"))
     )
 
     @property
@@ -304,6 +344,16 @@ class Settings:
             problems.append(
                 "PACT_PAYPAL_SANDBOX_ONLY is set but the PayPal configuration resolves "
                 "to a live host; refusing to talk to production PayPal"
+            )
+        # Anonymous guests must never be able to drive a real-money capture. Sandbox
+        # money is fine to expose publicly; live money is not, so a deployment that
+        # would move real money is refused outright rather than silently gating the
+        # guest surface (a gate that could be flipped by a later misconfiguration).
+        if self.auth.guests_enabled and self.paypal.is_live:
+            problems.append(
+                "PACT_GUEST_SESSIONS is enabled but PayPal resolves to a live host; "
+                "anonymous guest sessions must never move real money. Point PayPal at "
+                "sandbox or disable guest sessions"
             )
         if self.is_production:
             if not self.auth.configured:

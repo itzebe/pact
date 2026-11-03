@@ -89,6 +89,63 @@ Design decisions that matter:
   bypasses only the email-verification requirement, never a role or ownership
   check.
 
+## Guest sessions (public evaluation)
+
+The operator-token model and the customer-account subsystem above are both
+unchanged. A third, *optional* credential form exists so a public deployment can be
+used without any credential at all: a **guest session**. It is off by default
+(`PACT_GUEST_SESSIONS` unset → `POST /api/auth/guest` is a `404`).
+
+A guest is not a demo mode bolted onto the side. On first visit the server
+provisions a real, isolated buyer account and hands the browser a signed session
+cookie, so the guest drives the *same* engine, the same ownership checks, and the
+same PayPal client as any other buyer.
+
+| Endpoint | Purpose | Auth |
+|---|---|---|
+| `POST /api/auth/guest` | Provision a workspace; set the session cookie | public (404 when disabled) |
+| `GET /api/auth/guest` | Report the current guest session | guest cookie |
+| `POST /api/auth/guest/logout` | Clear the session cookie (idempotent) | public |
+
+Design decisions that matter:
+
+- **Identity is server-managed.** Both the guest id (`gst_…`, 96 bits of entropy)
+  and the session token are generated server-side and signed with
+  `PACT_AUTH_SECRET`. A browser cannot choose its own id or present a token it was
+  not issued.
+- **Isolation is inherited, not bolted on.** A guest is an ordinary `buyer`
+  principal stored in the same users table (under the reserved, non-deliverable
+  `guest.pact.local` domain), so every existing ownership check already scopes it to
+  its own records. A guest can never be an `admin`.
+- **The cookie is `HttpOnly; Secure; SameSite=Lax`, scoped to `/api`.** JavaScript
+  cannot read it, it never travels in the clear, and a cross-site page cannot drive
+  a money route with it.
+- **CSRF is enforced with a double-submit token.** The matching CSRF token is
+  returned in the JSON body only (never a cookie) and echoed in `X-CSRF-Token` on
+  every state-changing request. A cross-site page can make the browser *send* the
+  cookie but cannot read the token, so it cannot forge the header. A
+  header-authenticated request is exempt — no browser attaches an `Authorization`
+  header cross-origin.
+- **Sessions are revocable.** The token carries the account's `token_version`, and
+  the authoritative version is read on every request, so a deleted or suspended
+  workspace is refused everywhere, not only on the money routes.
+- **Guests never move real money.** Startup refuses to run when
+  `PACT_GUEST_SESSIONS` is enabled and PayPal resolves to a live host. Sandbox money
+  is safe to expose publicly; live money is not, and the mismatch fails the
+  deployment rather than being silently gated at request time.
+- **A sandbox buyer account is offered, sandbox-only.** PayPal will not authorize an
+  order until the buyer approves it, and a judge has no sandbox account of their own,
+  so the flow would otherwise stop at "buyer approval required". When
+  `PAYPAL_SANDBOX_BUYER_EMAIL` / `PAYPAL_SANDBOX_BUYER_PASSWORD` are set, they are
+  returned on the guest session payload (`sandbox_buyer`) and shown in the approval
+  panel. They are withheld from every unauthenticated caller, from customer and
+  operator sessions, and whenever PayPal resolves to a live host — so a deployment
+  that moves real money never hands out a buyer credential.
+- **Abuse is bounded without hindering evaluation.** New workspaces are capped per
+  client address within a window, each workspace has a job quota, and the session
+  expires. The per-address cap keys on the *proxy-written* (rightmost)
+  `x-forwarded-for` entry, so a forged leftmost value cannot reset it.
+
 ## Transactional email
 
 Verification and reset emails are queued into an outbox table, not sent inline.
