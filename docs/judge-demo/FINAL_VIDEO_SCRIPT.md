@@ -1,17 +1,19 @@
 # Final demo video — script
 
-**Target length:** 100 seconds (hard limit: under 180 seconds; judges are not required
-to watch beyond three minutes).
+**Produced runtime:** the final cut
+[`pact-demo-final-narrated.mp4`](pact-demo-final-narrated.mp4) is **2:17** (hard limit:
+under 180 seconds; judges are not required to watch beyond three minutes).
 **Source of footage:** the live production product, <https://pact-flame.vercel.app>, in
 the PayPal **Sandbox** environment.
-**Voice:** calm, specific, no marketing adjectives.
+**Voice:** calm, specific, no marketing adjectives. Synthesized via `edge-tts`.
 
 Each beat below is one continuous shot of the real application in a named state. The
-narration says only what is on screen at that moment. Read time assumes ~2.5 words/second.
+narration says only what is on screen at that moment. Exact timings are in
+[`FINAL_VIDEO_TRANSCRIPT.md`](FINAL_VIDEO_TRANSCRIPT.md).
 
 ---
 
-## Beat 1 — The tension · 0:00–0:10
+## Beat 1 — The tension · 0:00–0:18
 
 **On screen:** title card, then the PACT header fading in.
 **Shot:** static, no cursor movement.
@@ -22,7 +24,7 @@ narration says only what is on screen at that moment. Read time assumes ~2.5 wor
 
 ---
 
-## Beat 2 — The product opens · 0:10–0:25
+## Beat 2 — The product opens · 0:18–0:38
 
 **On screen:** the production URL loads. The header reads **Guest workspace** and
 **PayPal Sandbox**. The composer is visible on the right; the settlement view is empty.
@@ -34,7 +36,7 @@ narration says only what is on screen at that moment. Read time assumes ~2.5 wor
 
 ---
 
-## Beat 3 — Coordination · 0:25–0:45
+## Beat 3 — Coordination · 0:38–1:04
 
 **On screen:** **Post a job** panel with the *Launch copy* preset applied; the brief,
 acceptance criteria and budget ceiling filled in. Then **Post job and settle** is
@@ -49,7 +51,7 @@ settle**; the negotiation transcript scrolls once.
 
 ---
 
-## Beat 4 — Payment · 0:45–1:10
+## Beat 4 — Payment · 1:04–1:27
 
 **On screen:** the payment panel in the `awaiting_approval` state —
 **"Waiting for your approval in PayPal"** — with **Open PayPal approval** and the
@@ -66,7 +68,7 @@ blurred.
 
 ---
 
-## Beat 5 — Proof · 1:10–1:30
+## Beat 5 — Proof · 1:27–1:45
 
 **On screen:** the panel now reads **"Paid — captured from escrow"**; the summary shows
 **Verification: Passed, score 1.00**; the **Ledger** tab shows the hash-chained entries.
@@ -79,7 +81,7 @@ blurred.
 
 ---
 
-## Beat 6 — Protection · 1:30–1:45
+## Beat 6 — Protection · 1:45–2:00
 
 **On screen:** **Refund this payment** is pressed, confirmed, and the panel becomes
 **"Payment refunded"**.
@@ -91,7 +93,7 @@ blurred.
 
 ---
 
-## Beat 7 — Payoff · 1:45–2:00
+## Beat 7 — Payoff · 2:00–2:17
 
 **On screen:** the settled-then-refunded job with the ledger behind it; then a closing
 card with the live URL and the repository.

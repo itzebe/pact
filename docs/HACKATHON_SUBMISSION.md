@@ -147,9 +147,9 @@ matters more than making the happy path look smooth.
 | Evidence pack | [`judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md`](judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md) |
 | Screenshots | [`judge-demo/screenshots/`](judge-demo/screenshots) |
 | Architecture | [`TOPOLOGY.md`](TOPOLOGY.md) |
-| Demo video (narrated, earlier cut) | [`demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4) (2:52, predates guest flow + refunds) |
-| Demo video (silent walkthrough, current) | [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4) |
-| Demo video (YouTube link) | ⏳ **Owner action** — record the final narrated cut, upload, paste link here |
+| Demo video (final narrated, 2:17) | [`judge-demo/pact-demo-final-narrated.mp4`](judge-demo/pact-demo-final-narrated.mp4) |
+| Demo video (silent walkthrough) | [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4) |
+| Demo video (YouTube link) | ⏳ **Owner action** — upload the final cut to YouTube (public) and paste the link here |
 | Judge entry point | [`FINAL_JUDGE_PACKAGE.md`](FINAL_JUDGE_PACKAGE.md) |
 | Judging strategy | [`JUDGING_STRATEGY.md`](JUDGING_STRATEGY.md) |
 

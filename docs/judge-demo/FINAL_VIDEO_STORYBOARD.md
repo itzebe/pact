@@ -1,6 +1,6 @@
 # Final demo video — storyboard
 
-Frame-by-frame plan for the 100-second demo. Each row is one shot. "State" is the real
+Frame-by-frame plan for the final 2:17 demo (`pact-demo-final-narrated.mp4`). Each row is one shot. "State" is the real
 application state that must be on screen for the shot to be honest.
 
 Resolution 1600×900 (16:9), browser zoom 100%. Record at 30 fps. Desktop framing; a
@@ -8,7 +8,7 @@ short mobile insert is optional in Beat 2 if time allows.
 
 ---
 
-## Beat 1 — The tension (0:00–0:10)
+## Beat 1 — The tension (0:00–0:18)
 
 | | |
 | --- | --- |
@@ -17,7 +17,7 @@ short mobile insert is optional in Beat 2 if time allows.
 | Audio | Narration (Beat 1). Quiet bed, no music with third-party rights. |
 | State | N/A (card) |
 
-## Beat 2 — The product opens (0:10–0:25)
+## Beat 2 — The product opens (0:18–0:38)
 
 | | |
 | --- | --- |
@@ -26,7 +26,7 @@ short mobile insert is optional in Beat 2 if time allows.
 | Audio | Narration (Beat 2). |
 | State | Fresh guest workspace, no jobs. |
 
-## Beat 3 — Coordination (0:25–0:45)
+## Beat 3 — Coordination (0:38–1:04)
 
 | | |
 | --- | --- |
@@ -35,7 +35,7 @@ short mobile insert is optional in Beat 2 if time allows.
 | Audio | Narration (Beat 3). |
 | State | Job created; negotiation converged to an agreed price. |
 
-## Beat 4 — Payment (0:45–1:10)
+## Beat 4 — Payment (1:04–1:27)
 
 | | |
 | --- | --- |
@@ -45,7 +45,7 @@ short mobile insert is optional in Beat 2 if time allows.
 | State | `awaiting_approval` → hold placed (`held`). |
 | Safety | Blur the Sandbox buyer email and password in every frame. |
 
-## Beat 5 — Proof (1:10–1:30)
+## Beat 5 — Proof (1:27–1:45)
 
 | | |
 | --- | --- |
@@ -54,7 +54,7 @@ short mobile insert is optional in Beat 2 if time allows.
 | Audio | Narration (Beat 5). |
 | State | `released` (capture `COMPLETED`); ledger chain valid. |
 
-## Beat 6 — Protection (1:30–1:45)
+## Beat 6 — Protection (1:45–2:00)
 
 | | |
 | --- | --- |
@@ -63,7 +63,7 @@ short mobile insert is optional in Beat 2 if time allows.
 | Audio | Narration (Beat 6). |
 | State | `refunded`. |
 
-## Beat 7 — Payoff (1:45–2:00)
+## Beat 7 — Payoff (2:00–2:17)
 
 | | |
 | --- | --- |

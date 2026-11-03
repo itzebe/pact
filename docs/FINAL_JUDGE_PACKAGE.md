@@ -120,12 +120,15 @@ network boundary stubbed, plus API contract tests against the live FastAPI app.
 ## 6. Honest limitations
 
 - **Sandbox only.** The demo never implies real payments.
-- **Demo videos.** An **existing narrated 2:52 demo** exists at
-  [`demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4) (live app + PayPal Sandbox), but
-  it predates the guest experience and refunds. A **new silent 58 s walkthrough** of the
-  current product is at [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4).
-  The final narrated cut, the YouTube upload, and the Devpost submission are owner actions.
-  See [`judge-demo/FINAL_VIDEO_CHECKLIST.md`](judge-demo/FINAL_VIDEO_CHECKLIST.md).
+- **Demo videos.** The **final narrated cut** is
+  [`judge-demo/pact-demo-final-narrated.mp4`](judge-demo/pact-demo-final-narrated.mp4)
+  (2:17, synthesized narration, burned captions, PayPal-Sandbox labelled). A silent
+  walkthrough of the same flow is
+  [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4)
+  (0:58). An earlier narrated demo, [`demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4)
+  (2:52), predates the guest experience and refunds. The **YouTube upload and the Devpost
+  submission are owner actions.** See
+  [`judge-demo/FINAL_VIDEO_CHECKLIST.md`](judge-demo/FINAL_VIDEO_CHECKLIST.md).
 - **Verification is model-backed** and can occasionally fail a run (which correctly voids
   the hold).
 - **No dispute/arbitration flow** and **no partial release** yet.
