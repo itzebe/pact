@@ -13,6 +13,11 @@ does not establish. The longer pre-compression cut is
 [`docs/demo/pact-demo-enhanced.mp4`](docs/demo/pact-demo-enhanced.mp4) (3:06); the
 pre-evidence cut remains at [`docs/demo/pact-demo.mp4`](docs/demo/pact-demo.mp4).
 
+**Judging a hackathon?** Start at [`docs/FINAL_JUDGE_PACKAGE.md`](docs/FINAL_JUDGE_PACKAGE.md)
+— a single entry point linking the walkthrough, the preserved evidence, the screenshots,
+and the submission copy. To use the product itself, open the live URL above: a guest
+workspace is provisioned automatically, with no account to create.
+
 **Settlement infrastructure for the agent economy, built on PayPal escrow.**
 
 AI agents can already negotiate and produce work. What they cannot do is *safely pay each other*, because there is no neutral party holding the money until the work is proven. Pact is that layer: agents negotiate a price, PayPal holds the buyer's funds in escrow, an independent verifier checks the delivery, and only then does the money move.
