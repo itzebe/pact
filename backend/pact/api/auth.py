@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
-from fastapi import Depends, Header, HTTPException, Query, status
+from fastapi import Depends, Header, HTTPException, Query, Request, status
 
 from ..config import ALLOWED_AUTH_ALGORITHMS, settings
 from ..core.ticket_store import ticket_store
@@ -58,6 +58,21 @@ STREAM_TICKET_TTL = timedelta(seconds=60)
 # match. See ``_decode``.
 TOKEN_ISSUER = "pact"
 TOKEN_AUDIENCE = "pact-api"
+
+# Guest (judge) session cookie. Scoped to ``/api`` so the browser never attaches it
+# to a static asset request, and host-only (no ``Domain``) so it cannot leak to a
+# sibling subdomain. It is ``HttpOnly`` so frontend JavaScript cannot read it and
+# ``SameSite=Lax`` so it is not sent on a cross-site sub-request — which, with the
+# synchroniser CSRF token below, is what keeps a third-party page from driving a
+# money route on a judge's behalf. See ``pact.core.guests``.
+GUEST_COOKIE = "pact_guest"
+GUEST_COOKIE_PATH = "/api"
+#: Header that must echo the CSRF token carried inside the guest session for any
+#: state-changing request. A cross-origin page can make the browser *send* the
+#: cookie, but it cannot read the token out of the JSON response, so it cannot set
+#: this header.
+CSRF_HEADER = "X-CSRF-Token"
+MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def stream_scope(job_id: str) -> str:
@@ -98,6 +113,15 @@ class Principal:
     # The account token version carried by a customer access token (``ver``). ``None``
     # for a legacy operator token, which has no customer row to version.
     token_version: int | None = None
+    # True when this principal was authenticated from the guest session *cookie*
+    # rather than an ``Authorization`` header. A cookie-authenticated request must
+    # also present the matching CSRF token on a mutating method (see
+    # ``require_principal``); a header-authenticated request is exempt because a
+    # browser cannot set an ``Authorization`` header cross-origin at all.
+    via_cookie: bool = False
+    # The CSRF token carried inside the guest session. Kept off any response body;
+    # it is compared, never echoed from here.
+    csrf_token: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -110,6 +134,12 @@ class Principal:
     @property
     def is_seller(self) -> bool:
         return self.role == ROLE_SELLER
+
+    @property
+    def is_guest(self) -> bool:
+        from ..core.guests import is_guest_id
+
+        return is_guest_id(self.subject)
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -232,6 +262,11 @@ def _principal_from_claims(claims: dict[str, Any]) -> Principal:
         raise _unauthorized("Token is missing a subject")
     if role not in VALID_ROLES:
         raise _unauthorized("Token carries an unknown role")
+    # A guest session is deliberately cookie-only. Accepting it as a header token
+    # would create a path around the CSRF check, so it is refused on every
+    # header/ticket path here — the cookie path builds its principal elsewhere.
+    if claims.get("typ") == "guest":
+        raise _unauthorized("A guest session is only valid as a session cookie")
     scope = claims.get("scope")
     jti = claims.get("jti")
     ver = claims.get("ver")
@@ -255,12 +290,28 @@ def _assert_not_scoped(principal: Principal) -> None:
 
 
 def require_principal(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
+    x_csrf_token: Annotated[str | None, Header(alias=CSRF_HEADER)] = None,
 ) -> Principal:
-    """FastAPI dependency: resolve and verify the caller's bearer token.
+    """FastAPI dependency: resolve and verify the caller's credential.
+
+    Two credential forms are accepted, and only two:
+
+    * an ``Authorization: Bearer <token>`` header — an operator token, a customer
+      access token, or a test token; or
+    * the guest session cookie (``pact_guest``), when guest sessions are enabled.
 
     Fails closed: with no configured secret every request is refused, so an
     unconfigured deployment is unusable rather than open.
+
+    **CSRF.** A request authenticated from the cookie must, on a state-changing
+    method, echo the session's CSRF token in the ``X-CSRF-Token`` header. A
+    cross-site page can make the browser *send* the cookie, but it cannot read the
+    token (the cookie is ``HttpOnly`` and the token is only ever delivered in a
+    JSON body to a same-origin request), so it cannot forge this header. A
+    header-authenticated request is exempt: no browser attaches an
+    ``Authorization`` header cross-origin, so it is not reachable by CSRF.
     """
     if not settings.auth.configured:
         raise HTTPException(
@@ -271,17 +322,69 @@ def require_principal(
             ),
         )
 
-    if not authorization:
-        raise _unauthorized("Missing Authorization header")
+    # A bearer header, when present, is authoritative and short-circuits the cookie.
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise _unauthorized("Authorization header must be 'Bearer <token>'")
+        claims = _decode(token.strip())
+        principal = _principal_from_claims(claims)
+        _assert_not_scoped(principal)
+        return principal
 
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise _unauthorized("Authorization header must be 'Bearer <token>'")
-
-    claims = _decode(token.strip())
-    principal = _principal_from_claims(claims)
-    _assert_not_scoped(principal)
+    principal = _principal_from_guest_cookie(request)
+    if principal is None:
+        raise _unauthorized("Missing authentication token")
+    _enforce_csrf(request, principal, x_csrf_token)
     return principal
+
+
+def _principal_from_guest_cookie(request: Request) -> Principal | None:
+    """Resolve a guest principal from the session cookie, or ``None``.
+
+    Returns ``None`` (never raises) when guest sessions are disabled, the cookie is
+    absent, or the token does not verify — the caller turns that into a 401.
+
+    The token's ``ver`` is checked against the guest's *authoritative* token
+    version, so a revoked or deleted workspace is refused on every route, not only
+    on the money routes. This is one indexed read; it is what makes a guest session
+    server-managed rather than merely signed.
+    """
+    from ..core.guests import decode_guest_session, guests
+
+    if not settings.auth.guests_enabled:
+        return None
+    raw = request.cookies.get(GUEST_COOKIE)
+    if not raw:
+        return None
+    claims = decode_guest_session(raw)
+    if claims is None:
+        return None
+    subject = str(claims.get("sub"))
+    version = claims.get("ver")
+    authoritative = guests.token_version_of(subject)
+    # -1 means the workspace no longer exists or is not active.
+    if authoritative < 0 or not isinstance(version, int) or version != authoritative:
+        return None
+    return Principal(
+        subject=subject,
+        role=ROLE_BUYER,
+        token_version=version,
+        via_cookie=True,
+        csrf_token=claims.get("csrf") if isinstance(claims.get("csrf"), str) else None,
+    )
+
+
+def _enforce_csrf(request: Request, principal: Principal, provided: str | None) -> None:
+    from ..core.guests import csrf_matches
+
+    if request.method.upper() not in MUTATING_METHODS:
+        return
+    if not csrf_matches(principal.csrf_token or "", provided):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Missing or invalid CSRF token",
+        )
 
 
 def require_buyer(principal: Annotated[Principal, Depends(require_principal)]) -> Principal:
@@ -401,26 +504,40 @@ def issue_stream_ticket(principal: Principal, job_id: str) -> str:
 
 def require_stream_principal(
     job_id: str,
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     ticket: Annotated[str | None, Query()] = None,
 ) -> Principal:
     """Auth for the SSE stream, which the browser cannot send headers on.
 
-    Two paths, both strictly verified:
+    Three paths, all strictly verified:
 
     * an ``Authorization`` header (a non-browser client, or a test), which must
       carry a full token — never a scoped ticket; or
     * a ``?ticket=`` query parameter, which must carry a *stream ticket scoped to
       this exact job*. A full token in the query is refused, so a leaked URL can
-      never expose the caller's real credential.
+      never expose the caller's real credential; or
+    * the guest session cookie, for the browser case where the client is a guest.
+
+    The cookie path is safe here for the same reason it is on every other route:
+    the guest session is ``SameSite=Lax``, so a cross-site ``EventSource`` does not
+    carry it, and the stream is a read of the caller's own job (ownership is
+    checked immediately after).
     """
     if authorization:
         scheme, _, value = authorization.partition(" ")
         if scheme.lower() != "bearer" or not value.strip():
             raise _unauthorized("Authorization header must be 'Bearer <token>'")
         return principal_from_token(value)
-    if not ticket:
-        raise _unauthorized("Missing Authorization header or stream ticket")
+    if ticket:
+        return _principal_from_stream_ticket(job_id, ticket)
+    principal = _principal_from_guest_cookie(request)
+    if principal is not None:
+        return principal
+    raise _unauthorized("Missing Authorization header or stream ticket")
+
+
+def _principal_from_stream_ticket(job_id: str, ticket: str) -> Principal:
     # Fail closed before decoding, exactly like the header paths. Without this an
     # unconfigured deployment would reach the verifier with an empty key.
     if not settings.auth.configured:
@@ -483,6 +600,12 @@ __all__ = [
     "VALID_ROLES",
     "DEFAULT_TOKEN_TTL",
     "STREAM_TICKET_TTL",
+    "TOKEN_ISSUER",
+    "TOKEN_AUDIENCE",
+    "GUEST_COOKIE",
+    "GUEST_COOKIE_PATH",
+    "CSRF_HEADER",
+    "MUTATING_METHODS",
     "stream_scope",
     "issue_token",
     "issue_stream_ticket",

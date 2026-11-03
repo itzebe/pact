@@ -92,3 +92,31 @@ test('a full refund on a released escrow is not shown as partly refunded', () =>
     capture_id: 'CAP-1', refunded_amount: 120 }))
   assert.doesNotMatch(s.headline, /partly refunded/i)
 })
+
+test('a released capture is refundable; a refunded one is not', () => {
+  // The UI must offer the refund action exactly where the server will accept it:
+  // a captured (released) payment, and never on one already reversed.
+  const released = paymentStatus({
+    escrow: { state: 'released', amount: 100, currency: 'USD', refunded_amount: 0 },
+  })
+  assert.equal(released.refundable, true)
+  assert.equal(released.refundableAmount, 100)
+
+  const refunded = paymentStatus({
+    escrow: { state: 'refunded', amount: 100, currency: 'USD', refunded_amount: 100 },
+  })
+  assert.equal(refunded.refundable, false)
+})
+
+test('a partial refund leaves only the remainder refundable', () => {
+  const partial = paymentStatus({
+    escrow: { state: 'released', amount: 100, currency: 'USD', refunded_amount: 40 },
+  })
+  assert.equal(partial.refundable, true)
+  assert.equal(partial.refundableAmount, 60)
+})
+
+test('a voided hold offers no refund — there was no capture', () => {
+  const voided = paymentStatus({ escrow: { state: 'voided', amount: 100 } })
+  assert.equal(voided.refundable, false)
+})

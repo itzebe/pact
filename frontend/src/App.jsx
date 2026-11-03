@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, getToken, money, pollJob, setToken, streamJob } from './lib/api'
+import {
+  api,
+  bootstrapSession,
+  endGuestSession,
+  getToken,
+  money,
+  pollJob,
+  setToken,
+  streamJob,
+} from './lib/api'
 import { displayStatus } from './lib/status'
 import {
   Empty,
@@ -35,6 +44,9 @@ export default function App() {
   const [live, setLive] = useState(false)
   const [liveEntries, setLiveEntries] = useState([])
   const [token, setTokenState] = useState(() => getToken())
+  // The product is the first screen. A session is established automatically before
+  // anything renders, so a visitor with no credential lands on the working app.
+  const [session, setSession] = useState({ status: 'starting' })
   const unsubRef = useRef(null)
 
   const refreshLists = useCallback(async () => {
@@ -47,8 +59,26 @@ export default function App() {
     }
   }, [])
 
+  // Zero-friction entry: mint or restore a guest session on first load. There is
+  // nothing to paste and no form to fill. An operator who has stored a token skips
+  // this entirely.
   useEffect(() => {
-    if (!token) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const result = await bootstrapSession()
+        if (!cancelled) setSession({ status: 'ready', ...result })
+      } catch (e) {
+        if (!cancelled) setSession({ status: 'error', message: e.message })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (session.status !== 'ready') return
     ;(async () => {
       try {
         setHealth(await api.health())
@@ -57,7 +87,7 @@ export default function App() {
         setError(e.message)
       }
     })()
-  }, [refreshLists, token])
+  }, [refreshLists, session.status])
 
   const connect = useCallback((value) => {
     setToken(value)
@@ -157,6 +187,22 @@ export default function App() {
     }
   }, [job, refreshLists])
 
+  const refund = useCallback(async (body) => {
+    if (!job) return
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await api.refundJob(job.id, body)
+      setJob(updated)
+      setLiveEntries(updated.ledger ?? [])
+      await refreshLists()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }, [job, refreshLists])
+
   const reconcile = useCallback(async () => {
     if (!job) return
     setBusy(true)
@@ -205,12 +251,17 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-ink-950 grain">
-      <Header health={health} live={live} onDisconnect={token ? () => connect('') : null} />
+      <Header health={health} live={live} guest={session.status === 'ready' && session.type === 'guest'} onDisconnect={token ? () => connect('') : null} />
 
       <main className="mx-auto max-w-[1500px] px-5 py-6">
-        {!token ? (
+        {session.status === 'starting' && <Starting />}
+        {session.status === 'error' && (
+          <SessionError message={session.message} onRetry={() => window.location.reload()} />
+        )}
+        {session.status === 'ready' && session.type === 'unavailable' && !token && (
           <Connect onConnect={connect} />
-        ) : (
+        )}
+        {session.status === 'ready' && (session.type !== 'unavailable' || token) && (
           <>
         {error && (
           <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-voided/40 bg-voided-dim/40 px-4 py-3">
@@ -239,8 +290,10 @@ export default function App() {
               job={viewJob}
               busy={busy}
               approvalUrl={job.escrow.approval_url}
+              sandboxBuyer={session.sandbox_buyer}
               onApprove={approve}
               onReconcile={reconcile}
+              onRefund={refund}
             />
           </div>
         )}
@@ -359,14 +412,14 @@ function Connect({ onConnect }) {
   const [value, setValue] = useState('')
   return (
     <div className="panel mx-auto mt-16 max-w-lg px-6 py-8">
-      <div className="label">Access token required</div>
+      <div className="label">Operator access</div>
       <h1 className="mt-2 text-base font-semibold tracking-tight text-paper">
         Connect to this Pact deployment
       </h1>
       <p className="mt-2 text-xs leading-relaxed text-paper-dim">
-        Every endpoint requires a signed bearer token, so a public link cannot be used to read or
-        move another party's money. Paste a token to continue. Tokens are minted by the operator;
-        see the README for the command.
+        Guest sessions are disabled on this deployment, so every endpoint requires a signed bearer
+        token. Paste an operator token to continue; tokens are minted by the operator, see the
+        README for the command.
       </p>
       <form
         className="mt-5 flex gap-2"
@@ -400,9 +453,10 @@ function Connect({ onConnect }) {
   )
 }
 
-function Header({ health, live, onDisconnect }) {
+function Header({ health, live, guest, onDisconnect }) {
   const paypalMode = health?.paypal?.mode
   const llmMock = health?.llm?.is_mock
+  const [startingFresh, setStartingFresh] = useState(false)
   return (
     <header className="sticky top-0 z-20 border-b border-ink-800 bg-ink-950/85 backdrop-blur">
       <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-3">
@@ -420,6 +474,28 @@ function Header({ health, live, onDisconnect }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {guest && (
+            <span
+              className="chip bg-ink-800 text-paper-faint ring-1 ring-ink-600"
+              title="You are in a private guest workspace. Your jobs, payments and ledger are visible only to this browser session."
+            >
+              Guest workspace
+            </span>
+          )}
+          {guest && (
+            <button
+              onClick={async () => {
+                setStartingFresh(true)
+                await endGuestSession()
+                window.location.reload()
+              }}
+              disabled={startingFresh}
+              className="chip bg-ink-800 text-paper-faint ring-1 ring-ink-600 hover:text-paper disabled:opacity-50"
+              title="Abandon this workspace and start a new, empty one"
+            >
+              {startingFresh ? 'Starting…' : 'New workspace'}
+            </button>
+          )}
           {llmMock && (
             <span
               className="chip bg-ink-800 text-paper-faint ring-1 ring-ink-600"
@@ -447,6 +523,35 @@ function Header({ health, live, onDisconnect }) {
         </div>
       </div>
     </header>
+  )
+}
+
+function Starting() {
+  return (
+    <div className="panel mx-auto mt-16 max-w-lg px-6 py-8">
+      <div className="flex items-center gap-3">
+        <span className="live-dot h-2 w-2 rounded-full bg-paypal" />
+        <div>
+          <div className="text-sm font-medium text-paper">Starting your workspace</div>
+          <div className="mt-0.5 text-xs text-paper-dim">Setting up a private session…</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SessionError({ message, onRetry }) {
+  return (
+    <div className="panel mx-auto mt-16 max-w-lg px-6 py-8">
+      <div className="label text-voided">Session unavailable</div>
+      <h1 className="mt-2 text-base font-semibold tracking-tight text-paper">
+        Could not start a workspace
+      </h1>
+      <p className="mt-2 text-xs leading-relaxed text-paper-dim">{message}</p>
+      <button onClick={onRetry} className="btn-primary mt-5 w-full">
+        Try again
+      </button>
+    </div>
   )
 }
 

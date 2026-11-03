@@ -128,6 +128,44 @@ def test_webhook_id_is_read_from_the_environment():
     assert s.paypal.webhook_id == "WH-123"
 
 
+# ------------------------------------------------- guest sessions vs live money
+
+
+def test_guest_sessions_are_refused_when_paypal_is_live():
+    """An anonymous guest must never be able to drive a real-money capture.
+
+    Sandbox money is safe to expose publicly; live money is not. Rather than gate
+    the guest surface at request time (a gate a later misconfiguration could flip),
+    the whole deployment is refused so the mismatch cannot go unnoticed.
+    """
+    s = _settings(
+        PACT_GUEST_SESSIONS="true",
+        PAYPAL_ENVIRONMENT="live",
+        PAYPAL_BASE_URL=None,
+        PACT_ENV="test",
+    )
+    assert any("guest" in p.lower() and "live" in p.lower() for p in s.validate_runtime())
+
+
+def test_guest_sessions_are_allowed_on_sandbox():
+    s = _settings(
+        PACT_GUEST_SESSIONS="true",
+        PAYPAL_ENVIRONMENT="sandbox",
+        PAYPAL_BASE_URL=None,
+        PACT_ENV="test",
+    )
+    assert not any("guest" in p.lower() for p in s.validate_runtime())
+
+
+def test_the_guest_guard_cannot_be_bypassed_with_a_live_base_url_override():
+    s = _settings(
+        PACT_GUEST_SESSIONS="true",
+        PAYPAL_BASE_URL="https://api-m.paypal.com",
+        PACT_ENV="test",
+    )
+    assert any("guest" in p.lower() and "live" in p.lower() for p in s.validate_runtime())
+
+
 def test_webhook_id_defaults_to_empty():
     s = _settings(PAYPAL_WEBHOOK_ID=None)
     assert s.paypal.webhook_id == ""

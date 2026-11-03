@@ -27,7 +27,12 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..core.accounts import AuthError, accounts
 from ..core.auth_store import hash_identifier
-from .auth import Principal, require_principal
+from .auth import (
+    GUEST_COOKIE,
+    GUEST_COOKIE_PATH,
+    Principal,
+    require_principal,
+)
 
 log = logging.getLogger("pact.auth.routes")
 
@@ -42,8 +47,63 @@ REFRESH_COOKIE_PATH = "/api/auth"
 
 
 def _client_ip_hash(request: Request) -> str:
-    client = request.client.host if request.client else "unknown"
-    return hash_identifier(client)
+    """Hash of the client address, for rate limiting only.
+
+    The *rightmost* ``x-forwarded-for`` entry is used: it is the one written by the
+    nearest trusted proxy (Vercel's edge, which documents that it overwrites this
+    header rather than appending to it). The leftmost entry is client-controllable
+    and would let a caller evade the per-address cap by forging a new value on every
+    request. Falling back to the socket peer keeps this correct when there is no
+    proxy in front. The value is hashed, never stored raw.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    candidate = ""
+    if forwarded:
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            candidate = parts[-1]
+    if not candidate:
+        candidate = request.client.host if request.client else "unknown"
+    return hash_identifier(candidate)
+
+
+def _now():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
+def _set_guest_cookie(response: Response, token: str, max_age: int) -> None:
+    """Set the guest session cookie.
+
+    ``HttpOnly`` so frontend JavaScript cannot read it, ``Secure`` so it never
+    travels in the clear, ``SameSite=Lax`` so a cross-site page cannot drive a
+    money route with it, and ``Path=/api`` so it is not attached to static assets.
+    The CSRF token the client needs travels in the JSON body, never in this cookie.
+    """
+    response.set_cookie(
+        key=GUEST_COOKIE,
+        value=token,
+        max_age=max_age,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path=GUEST_COOKIE_PATH,
+    )
+
+
+def _clear_guest_cookie(response: Response) -> None:
+    response.delete_cookie(key=GUEST_COOKIE, path=GUEST_COOKIE_PATH)
+
+
+def _require_guests_enabled() -> None:
+    """Refuse the guest surface when it is disabled.
+
+    Returns 404 (not 403) so a disabled feature does not advertise itself, exactly
+    as the registration surface does.
+    """
+    if not settings.auth.guests_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -176,6 +236,142 @@ def logout(request: Request, response: Response) -> Response:
     # Clear the cookie on the *injected* response and return it; building a new
     # Response would discard the Set-Cookie that expires the refresh token.
     _clear_refresh_cookie(response)
+    response.status_code = 204
+    return response
+
+
+# --------------------------------------------------------------------------- #
+# Guest (judge) sessions
+#
+# A judge opening the deployed product must be able to use it with no credential
+# to supply. These two public routes are the entire onboarding: ``session``
+# provisions a workspace and returns the CSRF token the client must echo; ``me``
+# reports who the cookie belongs to. The cookie itself is server-signed and is
+# never trusted from a request body.
+# --------------------------------------------------------------------------- #
+
+
+class GuestSessionRequest(BaseModel):
+    """An empty body. Present so the endpoint is a POST (a session is created) and
+    so a future optional display name has somewhere to live."""
+
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+def _sandbox_buyer_hint() -> dict | None:
+    """A sandbox buyer account a guest can use to approve the PayPal order.
+
+    PayPal will not authorize an order until the buyer approves it, and a public
+    judge has no sandbox account of their own, so the escrow flow would otherwise
+    stop at "buyer approval required" with nothing to click. When an operator
+    configures one, it is handed to *guests only* — never to an unauthenticated
+    caller, never to a customer or operator session — and only while the deployment
+    is pointed at the sandbox host, so it cannot leak from a deployment that moves
+    real money.
+    """
+    if settings.paypal.is_live:
+        return None
+    if not (settings.paypal.sandbox_buyer_email and settings.paypal.sandbox_buyer_password):
+        return None
+    return {
+        "email": settings.paypal.sandbox_buyer_email,
+        "password": settings.paypal.sandbox_buyer_password,
+        "note": "PayPal Sandbox test buyer — no real money is involved.",
+    }
+
+
+def _guest_payload(principal: Principal, *, expires_in: int) -> dict:
+    return {
+        "type": "guest",
+        "subject": principal.subject,
+        "role": principal.role,
+        "csrf_token": principal.csrf_token,
+        "expires_in": expires_in,
+        "sandbox_buyer": _sandbox_buyer_hint(),
+    }
+
+
+@public_router.post("/guest", status_code=201)
+def create_guest_session(
+    request: Request,
+    response: Response,
+    payload: GuestSessionRequest | None = None,
+) -> dict:
+    """Provision a guest workspace and start a session. No credential required.
+
+    This is the zero-friction entry point: a first-time visitor gets a real,
+    isolated buyer identity and a signed session cookie, so the actual product can
+    be used immediately. Two abuse controls apply and neither hinders an ordinary
+    evaluation:
+
+    * new workspaces are capped per client IP within a window, so one source cannot
+      mint unbounded rows and sandbox orders;
+    * each workspace has a job quota (enforced where jobs are created).
+
+    The CSRF token is returned in the body — the client stores it in memory and
+    echoes it in ``X-CSRF-Token`` on state-changing requests. It is never placed in
+    a cookie, and the session cookie is ``HttpOnly``, so no script can read the
+    session material.
+    """
+    _require_guests_enabled()
+
+    from ..core.guests import guests, issue_guest_session
+
+    ip_hash = _client_ip_hash(request)
+    recent = accounts.store.count_recent(
+        "guest_new", ip_hash, settings.auth.guest_new_window_seconds
+    )
+    if recent >= settings.auth.guest_new_per_ip:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many guest sessions from this address. Try again later.",
+        )
+    # Record the attempt *before* provisioning, so a burst cannot race past the cap.
+    accounts.store.record_attempt("guest_new", ip_hash, True)
+
+    try:
+        user = guests.provision()
+    except Exception as exc:  # store failure: fail closed, do not fake a session
+        log.error("Could not provision a guest session (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Guest sessions are temporarily unavailable.",
+        ) from exc
+
+    token, csrf, expires_at = issue_guest_session(user.id, token_version=user.token_version)
+    max_age = max(60, int((expires_at - _now()).total_seconds()))
+    _set_guest_cookie(response, token, max_age)
+    accounts.store.record_event("guest_created", actor_id=user.id, ip_hash=ip_hash)
+    principal = Principal(subject=user.id, role="buyer", token_version=user.token_version,
+                          via_cookie=True, csrf_token=csrf)
+    return _guest_payload(principal, expires_in=max_age)
+
+
+@public_router.get("/guest")
+def current_guest(principal: Annotated[Principal, Depends(require_principal)]) -> dict:
+    """Report the current guest session, or 401 if there is none.
+
+    Deliberately only answers for a *guest* cookie: a customer or operator
+    credential reaches this path with a different subject, and reporting it here
+    would blur the two surfaces. ``/auth/me`` is the general "who am I" route.
+    """
+    _require_guests_enabled()
+    if not principal.is_guest:
+        raise HTTPException(status_code=404, detail="Not a guest session")
+    return {
+        "type": "guest",
+        "subject": principal.subject,
+        "role": principal.role,
+        "csrf_token": principal.csrf_token,
+        "sandbox_buyer": _sandbox_buyer_hint(),
+    }
+
+
+@public_router.post("/guest/logout", status_code=204)
+def guest_logout(request: Request, response: Response) -> Response:
+    """End a guest session by clearing the cookie. Idempotent."""
+    _require_guests_enabled()
+    _clear_guest_cookie(response)
     response.status_code = 204
     return response
 

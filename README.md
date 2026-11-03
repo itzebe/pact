@@ -254,13 +254,18 @@ This is what makes the output defensible as a financial record rather than an ap
 
 ## API
 
-Every route below `/api` except `/api/health` requires a bearer token. The
-required role is listed per route; `buyer` and `seller` are scoped to their own
-jobs, and `admin` sees and acts on everything.
+Every route below `/api` except `/api/health` requires a credential. The default
+is a bearer token; on a deployment that enables guest sessions a visitor with no
+credential is given one automatically (see below). The required role is listed per
+route; `buyer` and `seller` are scoped to their own jobs, and `admin` sees and acts
+on everything.
 
 | Method | Path | Role | Purpose |
 |---|---|---|---|
 | `GET` | `/api/health` | public | Configuration and settlement mode |
+| `POST` | `/api/auth/guest` | public | Provision a guest workspace and set the session cookie (404 when disabled) |
+| `GET` | `/api/auth/guest` | guest cookie | Report the current guest session |
+| `POST` | `/api/auth/guest/logout` | public | Clear the guest session cookie |
 | `POST` | `/api/jobs` | buyer | Post a job (the buyer identity comes from the token) |
 | `GET` | `/api/jobs` | any | List jobs visible to the caller |
 | `GET` | `/api/jobs/{id}` | owner | Full job state |
@@ -325,6 +330,48 @@ endpoint table, the security decisions, and the threat model. The operator
 experience below needs none of this and works as-is.
 
 See [`docs/AUTH.md`](docs/AUTH.md) for the role model and the threat it addresses.
+
+### Guest sessions (optional, off by default)
+
+A deployment that should be usable without a credential can enable **guest
+sessions**. On the first visit the server provisions a real, isolated buyer
+workspace and sets an `HttpOnly; Secure; SameSite=Lax` session cookie scoped to
+`/api`, so the product is the first screen and there is nothing to paste, register,
+or verify. A guest is an ordinary `buyer` — the *same* engine, ownership checks,
+and PayPal client as any other buyer — so every existing record-scoping rule
+already isolates it.
+
+```bash
+# Backend (and the Vercel Production environment)
+PACT_GUEST_SESSIONS=true
+```
+
+State-changing requests from the cookie must echo the session's CSRF token in
+`X-CSRF-Token` (returned in the JSON body on session start; the frontend does this
+for you). A guest is never an `admin` and cannot reach operator routes, reconcile,
+delete, or read the provider order. New workspaces are capped per client address,
+each workspace has a job quota, and the session expires.
+
+Because guest sessions are for public evaluation, startup **refuses to run when
+they are enabled and PayPal resolves to a live host**: anonymous guests may drive
+real sandbox money, never real money. Keep `PAYPAL_ENVIRONMENT=sandbox`.
+
+PayPal will not authorize an order until the buyer approves it, and a judge has no
+sandbox account of their own, so the escrow flow would stop at "buyer approval
+required". Create a sandbox *personal* (buyer) account under
+[developer.paypal.com](https://developer.paypal.com/dashboard/accounts) and set it
+so a guest can complete that step:
+
+```bash
+PAYPAL_SANDBOX_BUYER_EMAIL=sb-buyer@personal.example.com
+PAYPAL_SANDBOX_BUYER_PASSWORD=...
+```
+
+It is surfaced only to a guest session on a sandbox host — never to an
+unauthenticated caller and never when PayPal resolves to live — so it cannot leak
+from a deployment that moves real money. Leave it unset and the flow simply stops
+at the approval step, exactly as before. See [`docs/AUTH.md`](docs/AUTH.md) for the
+endpoint table and the security decisions.
 
 ---
 

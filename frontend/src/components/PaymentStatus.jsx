@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { paymentStatus } from '../lib/status'
 import { Money } from './primitives'
 
@@ -49,10 +50,12 @@ function iconFor(status) {
   return ICON.held
 }
 
-export default function PaymentStatus({ job, busy, onApprove, onReconcile, approvalUrl }) {
+export default function PaymentStatus({ job, busy, onApprove, onReconcile, onRefund, approvalUrl, sandboxBuyer }) {
   const status = paymentStatus(job)
+  const [refunding, setRefunding] = useState(false)
   if (!status) return null
   const tone = TONE[status.tone] ?? TONE.neutral
+  const showRefund = status.refundable && typeof onRefund === 'function'
 
   return (
     <div className={`panel overflow-hidden ring-1 ${tone.ring}`}>
@@ -104,6 +107,58 @@ export default function PaymentStatus({ job, busy, onApprove, onReconcile, appro
                     ? 'I approved — continue'
                     : 'Reconcile with PayPal'}
               </button>
+            </div>
+          )}
+
+          {status.action === 'approve' && sandboxBuyer && (
+            <div className="mt-2 rounded-lg border border-ink-700 bg-ink-850/60 px-3 py-2">
+              <div className="text-2xs font-medium text-paper-dim">
+                Approve with this PayPal Sandbox test buyer
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-2xs text-paper">
+                <span>{sandboxBuyer.email}</span>
+                <span className="text-paper-faint">{sandboxBuyer.password}</span>
+              </div>
+              <div className="mt-1 text-2xs text-paper-faint">
+                Sandbox only — no real money moves.
+              </div>
+            </div>
+          )}
+
+          {showRefund && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!refunding ? (
+                <button
+                  onClick={() => setRefunding(true)}
+                  disabled={busy}
+                  className="chip ring-1 bg-ink-850 text-paper-dim ring-ink-600 hover:text-paper disabled:opacity-50"
+                >
+                  Refund this payment
+                </button>
+              ) : (
+                <>
+                  <span className="text-2xs text-paper-dim">
+                    Refund the captured amount to the buyer?
+                  </span>
+                  <button
+                    onClick={async () => {
+                      await onRefund({})
+                      setRefunding(false)
+                    }}
+                    disabled={busy}
+                    className="chip ring-1 bg-voided-dim/50 text-voided ring-voided/40 disabled:opacity-50"
+                  >
+                    {busy ? 'Refunding…' : 'Confirm refund'}
+                  </button>
+                  <button
+                    onClick={() => setRefunding(false)}
+                    disabled={busy}
+                    className="chip ring-1 bg-ink-850 text-paper-faint ring-ink-700 hover:text-paper-dim disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

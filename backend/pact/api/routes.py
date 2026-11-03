@@ -290,6 +290,7 @@ async def create_job(
     principal: Annotated[Principal, Depends(require_buyer)],
 ) -> dict[str, Any]:
     """Post a job. The buyer identity comes from the token, never the body."""
+    _enforce_guest_job_quota(principal)
     job = engine.create_job(
         title=payload.title,
         brief=payload.brief,
@@ -299,6 +300,28 @@ async def create_job(
         currency=settings.currency,
     )
     return _job_full(job)
+
+
+def _enforce_guest_job_quota(principal: Principal) -> None:
+    """Cap how many jobs a single guest workspace may create.
+
+    A ceiling on how much of the shared (real, sandbox) payment rail one visitor
+    can exercise. It applies only to guests: a registered buyer or an operator is
+    not bounded here. Refused with 429 so the client can say why without implying a
+    server fault.
+    """
+    if not principal.is_guest:
+        return
+    from ..core.guests import guests
+
+    if guests.quota_exceeded(engine.store, principal.subject):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"This guest workspace has reached its limit of "
+                f"{settings.auth.guest_max_jobs} jobs. Start a new session to continue."
+            ),
+        )
 
 
 def _parse_seller_ids(raw: list[str] | None) -> list[str] | None:
