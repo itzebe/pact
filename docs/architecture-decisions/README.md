@@ -12,6 +12,7 @@ and grounded in the code and the project's own history.
 | [0004](0004-session-advisory-lock-on-direct-endpoint.md) | Serialise settlement with a session advisory lock on a direct endpoint |
 | [0005](0005-exactly-once-webhooks.md) | Process webhooks exactly once in a shared store |
 | [0006](0006-guest-first-zero-friction.md) | Guest-first onboarding as the default public experience |
+| [0007](0007-health-reports-is-live.md) | Report the resolved PayPal environment as `is_live`, not only the guard flag |
 
 ## Format
 

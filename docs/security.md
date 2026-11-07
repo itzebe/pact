@@ -182,7 +182,19 @@ criteria, non-finite budget).
   accident being prevented).
 - `PACT_GUEST_SESSIONS` with a live host is refused at startup.
 
-*Source:* `backend/pact/config.py` (`PayPalSettings.is_live`, `validate_runtime`).
+The guard is a **switch, not a status**: it is off by default, so
+`GET /api/health` reporting `paypal.sandbox_only: false` does **not** mean the process
+is pointed at live PayPal. The authoritative indicator is `paypal.is_live`, which is
+`true` only when the configuration resolves to PayPal's production host (either
+`PAYPAL_ENVIRONMENT=live` or a `PAYPAL_BASE_URL` override that is not a loopback or
+sandbox host). A correct sandbox deployment reads `environment: "sandbox"`,
+`is_live: false`, `mode: "sandbox"` and `sandbox_only: false`.
+
+*Source:* `backend/pact/config.py` (`PayPalSettings.is_live`, `validate_runtime`),
+`backend/pact/api/routes.py` (`health`).
+*Tests:* `tests/test_paypal_sandbox_config.py`
+(`test_sandbox_only_false_does_not_mean_live_money`,
+`test_the_health_surface_reports_whether_it_resolves_to_a_live_host`).
 
 ## Threat model
 

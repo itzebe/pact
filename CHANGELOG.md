@@ -6,10 +6,21 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #25**
-(`4ce1faf`, 2026-11-03).
+the `master` branch. The latest merge on `master` is **PR #29**
+(`3dceab6`, 2026-11-07).
 
 ## [Unreleased]
+
+### Changed — health reports the resolved PayPal environment (`is_live`)
+
+- `GET /api/health` now returns `paypal.is_live`: `true` only when the configuration
+  resolves to PayPal's production host. It disambiguates the deployment's real
+  environment from `paypal.sandbox_only`, which is the (off-by-default) guard switch;
+  `sandbox_only: false` on a safe sandbox deployment could previously be misread as
+  "live money". See `docs/architecture-decisions/0007-health-reports-is-live.md`.
+- Documentation updated to explain the distinction: `docs/api/README.md`,
+  `docs/security.md`, `docs/faq.md`. Regression coverage added in
+  `tests/test_paypal_sandbox_config.py`.
 
 ### Added — canonical documentation system (this change)
 

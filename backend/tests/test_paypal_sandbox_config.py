@@ -201,3 +201,47 @@ def test_the_health_surface_publishes_only_booleans_not_credentials():
         assert isinstance(value, (bool, str)), key
     assert isinstance(paypal["configured"], bool)
     assert isinstance(paypal["webhook_verification"], bool)
+
+
+# --------------------------------------------------- the health environment fields
+
+
+def test_the_health_surface_reports_whether_it_resolves_to_a_live_host():
+    """``paypal.is_live`` is the authoritative environment indicator.
+
+    ``sandbox_only`` is only the guard switch and is off by default, so it reads
+    ``false`` on a perfectly safe sandbox deployment. A reader must be able to tell
+    "is this process pointed at live PayPal?" from the health body alone, without
+    inferring it from the guard flag.
+    """
+    from fastapi.testclient import TestClient
+
+    from pact.main import app
+
+    paypal = TestClient(app).get("/api/health").json()["paypal"]
+    assert "is_live" in paypal
+    assert isinstance(paypal["is_live"], bool)
+
+
+def test_is_live_tracks_the_configured_environment():
+    sandbox = _settings(PAYPAL_ENVIRONMENT="sandbox", PAYPAL_BASE_URL=None)
+    assert sandbox.paypal.is_live is False
+    live = _settings(PAYPAL_ENVIRONMENT="live", PAYPAL_BASE_URL=None)
+    assert live.paypal.is_live is True
+
+
+def test_sandbox_only_false_does_not_mean_live_money():
+    """The exact production observation, pinned.
+
+    Production reported ``environment: sandbox`` and ``sandbox_only: false`` at the
+    same time. That is a safe sandbox deployment whose guard switch is simply unset;
+    it is not evidence of live money. ``is_live`` is what disambiguates it.
+    """
+    s = _settings(
+        PAYPAL_ENVIRONMENT="sandbox",
+        PAYPAL_BASE_URL=None,
+        PACT_PAYPAL_SANDBOX_ONLY=None,
+        PACT_ENV="production",
+    )
+    assert s.paypal.sandbox_only is False
+    assert s.paypal.is_live is False

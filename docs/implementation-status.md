@@ -73,9 +73,9 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **480 passed, 94 skipped**.
-- Backend (PostgreSQL 17): **568 passed, 6 skipped** (the 6 need a separate
-  PgBouncer endpoint). With PgBouncer in transaction mode: **573 passed, 1 skipped**.
+- Backend (filesystem store): **483 passed, 94 skipped**.
+- Backend (PostgreSQL 17): **571 passed, 6 skipped** (the 6 need a separate
+  PgBouncer endpoint). With PgBouncer in transaction mode: **576 passed, 1 skipped**.
 - Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.

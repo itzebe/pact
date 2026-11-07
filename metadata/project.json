@@ -28,6 +28,7 @@
     "verified_health": {
       "status": "ok",
       "paypal_mode": "sandbox",
+      "paypal_is_live": false,
       "paypal_settlement_is_real": true,
       "paypal_webhook_verification": true,
       "llm_is_mock": false,
