@@ -80,7 +80,8 @@ unknown GET path so client-side routes work (`_SPAStaticFiles` in `main.py`).
   requires a `released` escrow and a non-simulated capture; anything ambiguous
   resolves to a state that asks for a human (reconcile) rather than claiming success.
 - **Components**: `Composer` (post a job), `Negotiation`, `Verification`,
-  `PaymentStatus`, `Ledger`, `Reputation`, and shared `primitives`.
+  `PaymentStatus`, `Ledger`, `Reputation`, `Welcome` (first-run orientation), and
+  shared `primitives`.
 
 ## Backend
 
