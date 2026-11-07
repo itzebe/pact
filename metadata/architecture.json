@@ -1,0 +1,61 @@
+{
+  "schema_note": "Component map for PACT. Each component names its path, its responsibility, and its key collaborators. Derived from the source.",
+  "runtime": {
+    "entrypoint_vercel": "api/index.py -> pact.main:app",
+    "entrypoint_docker": "uvicorn pact.main:app",
+    "framework": "FastAPI",
+    "deployment": "docs/deployment.md"
+  },
+  "layers": {
+    "presentation": [
+      { "path": "frontend/src/App.jsx", "responsibility": "Guest-first SPA shell, tabs, session bootstrap" },
+      { "path": "frontend/src/lib/api.js", "responsibility": "API client, session bootstrap, SSE subscription, polling" },
+      { "path": "frontend/src/lib/status.js", "responsibility": "Pure payment-state honesty mapping" },
+      { "path": "frontend/src/components/", "responsibility": "Composer, Negotiation, Verification, PaymentStatus, Ledger, Reputation, primitives" }
+    ],
+    "api": [
+      { "path": "backend/pact/api/routes.py", "responsibility": "Job lifecycle, ledger, SSE stream, PayPal webhook", "collaborators": ["core/engine.py", "core/webhooks.py", "api/auth.py"] },
+      { "path": "backend/pact/api/auth.py", "responsibility": "Bearer/guest auth, roles, CSRF, stream tickets", "collaborators": ["core/ticket_store.py", "core/guests.py"] },
+      { "path": "backend/pact/api/auth_routes.py", "responsibility": "Customer accounts and guest session endpoints", "collaborators": ["core/accounts.py", "core/guests.py"] }
+    ],
+    "domain": [
+      { "path": "backend/pact/core/engine.py", "responsibility": "Orchestrator: one call drives brief to settled", "collaborators": ["core/negotiation.py", "core/settlement.py", "agents/seller.py"] },
+      { "path": "backend/pact/core/negotiation.py", "responsibility": "Multi-round bargaining and budget guardrail", "collaborators": ["core/llm.py"] },
+      { "path": "backend/pact/core/settlement.py", "responsibility": "Verifier and escrow hold/release/void/refund decisions", "collaborators": ["paypal/escrow.py", "core/llm.py", "core/models.py"] },
+      { "path": "backend/pact/core/models.py", "responsibility": "Job, EscrowRecord, hash-chained LedgerEntry", "collaborators": [] },
+      { "path": "backend/pact/agents/seller.py", "responsibility": "Seller deliverable production", "collaborators": ["core/llm.py"] }
+    ],
+    "integrations": [
+      { "path": "backend/pact/paypal/escrow.py", "responsibility": "Hand-written PayPal Orders v2 / Payments v2 escrow client", "collaborators": ["config.py"] },
+      { "path": "backend/pact/paypal/mock.py", "responsibility": "In-memory double with the same state machine", "collaborators": [] },
+      { "path": "backend/pact/core/llm.py", "responsibility": "Provider-agnostic LLM access and deterministic fallback", "collaborators": ["config.py"] }
+    ],
+    "persistence": [
+      { "path": "backend/pact/core/store.py", "responsibility": "Filesystem job store and reputation ledger", "collaborators": ["core/models.py"] },
+      { "path": "backend/pact/core/dbstore.py", "responsibility": "PostgreSQL job store and reputation ledger (instance-safe)", "collaborators": ["core/pool.py", "core/models.py"] },
+      { "path": "backend/pact/core/pool.py", "responsibility": "Bounded per-instance connection pool; direct() for the settlement lock", "collaborators": ["config.py"] },
+      { "path": "backend/pact/core/webhook_store.py", "responsibility": "Exactly-once webhook event registry", "collaborators": ["core/pool.py"] },
+      { "path": "backend/pact/core/ticket_store.py", "responsibility": "Single-use SSE ticket registry", "collaborators": ["core/pool.py"] },
+      { "path": "backend/pact/core/auth_store.py", "responsibility": "Users, sessions, refresh tokens, email outbox", "collaborators": ["core/pool.py", "core/passwords.py"] }
+    ],
+    "auth": [
+      { "path": "backend/pact/core/guests.py", "responsibility": "Guest workspace provisioning", "collaborators": ["core/auth_store.py"] },
+      { "path": "backend/pact/core/accounts.py", "responsibility": "Customer account lifecycle", "collaborators": ["core/auth_store.py", "core/passwords.py", "core/email.py"] },
+      { "path": "backend/pact/core/passwords.py", "responsibility": "Argon2id hashing", "collaborators": [] },
+      { "path": "backend/pact/core/email.py", "responsibility": "Transactional email dispatcher", "collaborators": ["core/auth_store.py"] }
+    ],
+    "configuration": [
+      { "path": "backend/pact/config.py", "responsibility": "All settings and the fail-closed runtime validation", "collaborators": [] },
+      { "path": "backend/pact/main.py", "responsibility": "FastAPI app, middleware, SPA mount, startup validation", "collaborators": ["config.py"] }
+    ]
+  },
+  "concurrency": {
+    "settlement_guard": "per-job re-entrant lock in-process; session advisory lock on PostgreSQL (core/dbstore.py settlement_claim)",
+    "direct_endpoint": "DatabasePool.direct uses DATABASE_URL_UNPOOLED or a derived Neon-style host",
+    "run_lease": "run_lease_expires_at; reclaim via a single conditional UPDATE",
+    "approval_claim": "approval_claimed_at with a TTL",
+    "concurrency_bound": "threading.BoundedSemaphore(PACT_MAX_CONCURRENT_RUNS)"
+  },
+  "data_flow": "docs/architecture.md#data-flow-one-run",
+  "reference": "docs/architecture.md"
+}

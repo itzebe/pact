@@ -1,0 +1,239 @@
+# llms-full.txt — PACT, consolidated reference
+
+> Machine-readable-friendly consolidation of PACT's verified documentation. This
+> file exists so an LLM can understand the project end to end without stitching
+> together many files. Where this file and a canonical document disagree, the
+> canonical document wins (see **Precedence** below).
+
+PACT — conditional settlement infrastructure for the agent economy.
+Repository: https://github.com/itzebe/pact · Live: https://pact-flame.vercel.app/ ·
+Health: https://pact-flame.vercel.app/api/health · Default branch: `master` ·
+License: MIT · Documentation version: see [`metadata/project.json`](metadata/project.json).
+
+---
+
+## Precedence of documents
+
+1. The **source code** is the ultimate authority for what PACT does.
+2. `README.md` and the files under `docs/` are the canonical prose.
+3. This file (`llms-full.txt`) and `llms.txt` are derived summaries.
+4. `metadata/*.json` is a machine-readable index with source references.
+
+If any derived file contradicts the code or the canonical docs, treat it as a bug
+and fix the derived file.
+
+---
+
+## 1. What PACT is
+
+PACT is a settlement layer for work performed between autonomous agents. Its single
+governing idea: **payment follows verified delivery.** A buyer posts a job; seller
+agents negotiate a price; PayPal holds the buyer's funds in escrow before any work
+starts; the seller produces a deliverable; an independent verifier checks it against
+the buyer's acceptance criteria; and the money is released (`capture`) on a pass or
+returned (`void`) on a fail. Every state transition is appended to a SHA-256
+hash-chained ledger that the UI can re-verify.
+
+PACT is guest-first: a public deployment provisions an isolated, server-managed
+buyer workspace on first visit so the product can be used with no account. It runs
+on the PayPal **Sandbox** host and moves no real money in the demo.
+
+## 2. The problem
+
+Two agents that do not trust each other cannot safely transact. If the buyer pays
+first, the seller can take the money and not deliver; if the seller delivers first,
+the buyer can refuse to pay. Existing "agent trust layers" mostly settle in crypto,
+which excludes ordinary fiat commerce. PayPal already provides the primitive this
+needs — an authorization that reserves funds and a two-way branch to capture or
+void — so PACT builds the coordination protocol on top of it.
+
+## 3. Who it serves
+
+- Autonomous buyer and seller agents transacting small, well-specified work.
+- Developers building agent marketplaces needing a fiat settlement primitive.
+- Evaluators wanting a runnable, auditable reference implementation of escrow.
+
+## 4. How it works (the lifecycle)
+
+```
+brief → negotiate → agree → HOLD (PayPal authorize) → deliver → verify ─┬─ pass → CAPTURE (release)
+                                                                        └─ fail → VOID    (return)
+```
+
+1. **Post a job.** A buyer supplies a title, a brief, acceptance criteria, and a
+   hard budget ceiling. The buyer identity comes from the authenticated token, not
+   the request body.
+2. **Negotiate.** Each seller agent quotes; the buyer counters; the price converges
+   over up to three rounds. The budget ceiling is enforced in code, not requested of
+   the model: an agreement above the ceiling is rejected by the engine regardless of
+   what the model returns. A convergence guarantee closes an affordable deal even if
+   the model never emits an explicit acceptance.
+3. **Hold funds.** PACT creates a PayPal order with `intent=AUTHORIZE`. PayPal
+   requires the buyer to approve the order before it can be authorized, so PACT
+   surfaces the order's `rel:payer-action` approval link and stops before any work
+   is produced. After approval, PACT authorizes the order and records the hold only
+   when PayPal reports a holdable authorization. The buyer has parted with nothing.
+4. **Deliver.** The selected seller agent produces the actual deliverable.
+5. **Verify.** An independent verifier checks the delivery against every acceptance
+   criterion, recording per-criterion evidence. Deterministic checks (artifact
+   present and non-trivial, no evasion markers, a summary present) and model
+   judgement are combined with a logical AND: a pass requires both.
+6. **Settle.** A pass captures the authorization and improves the seller's
+   reputation; a fail voids the hold, charges the buyer nothing, and lowers the
+   seller's reputation.
+7. **Refund.** A captured payment can be refunded in full or in part, capped at the
+   captured amount and idempotent per operation.
+
+Reputation feeds back into seller selection: selection divides price by a smoothed
+verified-delivery score, so an unreliable seller must be materially cheaper to win
+the next job.
+
+## 5. Architecture
+
+- **Backend:** Python 3.11+, FastAPI, Pydantic v2. Entry point
+  `backend/pact/main.py`; deployed on Vercel via `api/index.py`.
+- **Frontend:** React 18 + Vite + Tailwind, served as a static SPA; the UI is
+  guest-first and renders the negotiation, verification, ledger, and payment state.
+- **Escrow client:** hand-written PayPal `Orders v2` / `Payments v2` client
+  (`backend/pact/paypal/escrow.py`) plus an in-memory double with the same state
+  machine (`mock.py`).
+- **Persistence:** PostgreSQL (JSONB job documents + reputation + webhook + ticket
+  tables) with a filesystem fallback for single-instance development.
+- **Concurrency:** a per-job settlement guard; on PostgreSQL a session advisory lock
+  on a *direct* connection; leases for run and approval claims.
+- **AI:** any OpenAI-compatible chat endpoint; three agent roles (seller, buyer
+  counter, verifier) plus a deterministic mock fallback when no key is configured.
+
+Full detail: [`docs/architecture.md`](docs/architecture.md).
+
+## 6. Technology stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.11, FastAPI, Pydantic v2, sse-starlette, httpx, PyJWT, argon2-cffi |
+| Frontend | React 18, Vite 6, Tailwind CSS 3, AG Grid Community |
+| Database | PostgreSQL (Neon in production) via psycopg3 + psycopg_pool; filesystem JSON fallback |
+| Payments | PayPal Orders v2 / Payments v2 (Sandbox) |
+| AI | OpenAI-compatible endpoint (Groq `openai/gpt-oss-20b` in the deployed demo) |
+| Hosting | Vercel (Python function + static SPA); Docker and Render configs also present |
+| CI | GitHub Actions (backend + PostgreSQL 16 + PgBouncer, frontend, Docker image) |
+
+## 7. Payment and escrow
+
+The escrow primitive is PayPal `Orders v2` with `intent=AUTHORIZE`:
+`create → buyer approves → authorize (hold) → capture (release) | void (return)`.
+Refunds use `POST /v2/payments/captures/{id}/refund`. Every mutating call carries a
+`PayPal-Request-Id` for idempotency. The client's behaviour is pinned to PayPal's
+published OpenAPI enums (authorization `CREATED/CAPTURED/DENIED/PARTIALLY_CAPTURED/
+VOIDED/PENDING`; capture `COMPLETED/DECLINED/PARTIALLY_REFUNDED/PENDING/REFUNDED/
+FAILED`). Only a `COMPLETED` capture is settlement; only a holdable authorization is
+a hold.
+
+Full detail: [`docs/payment-lifecycle.md`](docs/payment-lifecycle.md).
+
+## 8. AI functionality
+
+Three roles, all through one OpenAI-compatible endpoint:
+
+- **Seller agent** — quotes a price per round, then produces the deliverable.
+- **Buyer agent** — counters each offer; never exceeds the budget (enforced in code).
+- **Verifier** — judges the delivery against each acceptance criterion and returns a
+  strict JSON verdict; a malformed verdict fails closed.
+
+The AI **proposes**; it never **authorizes**. The settlement engine decides whether
+money moves, and only the PayPal client moves it. Without an API key a deterministic
+mock policy engine runs so the whole lifecycle still works offline. Full detail:
+[`docs/ai-system.md`](docs/ai-system.md).
+
+## 9. Security
+
+- Fail-closed authentication: a missing `PACT_AUTH_SECRET` refuses every protected
+  request (503); in production the process refuses to start.
+- Object-level authorization: every job access checks the caller is a party; a
+  non-owner gets `404`, not `403`.
+- Guest sessions are cookie-authenticated (`HttpOnly`, `SameSite=Lax`, scoped to
+  `/api`) and require a CSRF token on mutating methods.
+- PayPal webhook signature verification via PayPal's own verify endpoint, with
+  exactly-once event processing in a shared store.
+- Duplicate capture/refund prevention through an in-flight claim, a settlement
+  guard, and per-operation idempotency keys.
+- A sandbox-only guard (`PACT_PAYPAL_SANDBOX_ONLY`) that hard-refuses a live host;
+  startup refuses guest sessions combined with a live host.
+- Bounded request bodies, bounded run concurrency, and redaction of credentials and
+  payer identity from logs and responses.
+
+Full detail: [`docs/security.md`](docs/security.md).
+
+## 10. Database and ledger
+
+Jobs are stored as JSONB documents in a `jobs` table with indexed columns; the
+reputation ledger in `reputation`; exactly-once webhook ids in `processed_webhooks`;
+consumed SSE tickets in `consumed_tickets`; and customer accounts, sessions, refresh
+tokens, and the email outbox in their own tables. Migrations are idempotent
+`CREATE ... IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements
+applied at startup. The audit ledger is a per-job, SHA-256 hash chain that is
+tamper-evident and verified live.
+
+Full detail: [`docs/database.md`](docs/database.md).
+
+## 11. Deployment
+
+The repository is configured for Vercel: `vercel.json` builds the frontend and
+routes `/api/*` to the FastAPI function in `api/index.py`. Production requires
+`DATABASE_URL` (shared Postgres), `PACT_AUTH_SECRET`, and sandbox PayPal
+credentials. Startup validation refuses an unsafe production configuration (no
+secret, no database, mock settlement, or a live PayPal host). The settlement lock
+runs on a direct (unpooled) endpoint derived from `DATABASE_URL` or set as
+`DATABASE_URL_UNPOOLED`. Full detail: [`docs/deployment.md`](docs/deployment.md).
+
+## 12. Verified status (as of the documentation commit)
+
+- Backend suite: **550 passed, 5 skipped** against PostgreSQL 17 (the 5 skips need a
+  separate PgBouncer endpoint, which the CI job provides).
+- Backend suite without a database: **465 passed, 90 skipped**.
+- Frontend suite: **40 passed**.
+- `pyflakes` clean; frontend production build succeeds.
+- Production `/api/health` returns `status: ok` with `paypal.mode: sandbox`,
+  `llm.is_mock: false`, `storage.backend: postgres`, `storage.durable: true`.
+
+The skips are environment-gated, not failures; see
+[`docs/implementation-status.md`](docs/implementation-status.md) and
+[`metadata/evidence.json`](metadata/evidence.json).
+
+## 13. Limitations
+
+- Sandbox only; no real money moves in the demo.
+- No independent security audit or certification.
+- Verification is a model plus deterministic checks, not a formal proof.
+- Customer self-service accounts and transactional email are implemented but
+  disabled by default (they need a verified email sending domain).
+- The frontend bundle is a single ~1.1 MB chunk (gzip ~325 kB); no code-splitting yet.
+
+## 14. How to run and test
+
+See [`docs/development.md`](docs/development.md) for the full, reproducible setup.
+Short version:
+
+```bash
+# Backend
+cd backend
+uv venv --python 3.11 .venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+export PACT_AUTH_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+uvicorn pact.main:app --reload --port 8000
+
+# Tests
+python -m pytest tests/ -q                 # filesystem store
+DATABASE_URL=postgresql://localhost/pact python -m pytest tests/ -q   # full
+cd ../frontend && npm install && npm test && npm run build
+```
+
+## 15. Links
+
+- Product and quick start: [`README.md`](README.md)
+- Documentation index: [`docs/README.md`](docs/README.md)
+- Navigation map: [`docs/knowledge-map.md`](docs/knowledge-map.md)
+- API reference: [`docs/api/README.md`](docs/api/README.md)
+- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Agent instructions: [`AGENTS.md`](AGENTS.md)
