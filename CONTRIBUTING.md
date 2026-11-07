@@ -40,7 +40,8 @@ Run the checks the project runs in CI:
 # Backend (filesystem store; Postgres tests self-skip)
 cd backend && python -m pytest tests/ -q
 
-# Backend with a database (nothing skips)
+# Backend with a database (the 5 pooler-routing tests still skip without
+# PGBOUNCER_URL; CI provides one)
 DATABASE_URL=postgresql://localhost/pact python -m pytest tests/ -q
 
 # Lint

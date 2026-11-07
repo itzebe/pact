@@ -130,7 +130,8 @@ brief → negotiate → agree → HOLD (authorize) → deliver → verify → ca
 - Run the suite before and after a change:
   - `cd backend && python -m pytest tests/ -q` (filesystem store; Postgres tests
     self-skip).
-  - With a database: `DATABASE_URL=... python -m pytest tests/ -q` (nothing skips).
+  - With a database: `DATABASE_URL=... python -m pytest tests/ -q` (the 5 pooler
+    routing tests still skip unless `PGBOUNCER_URL` is set; the CI job provides one).
   - `cd frontend && npm test`.
   - `cd backend && python -m pyflakes pact/ scripts/`.
 - **Never weaken or delete a test to make a change pass.** If a test is wrong, fix

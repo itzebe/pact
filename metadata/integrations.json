@@ -65,7 +65,7 @@
       "id": "transactional_email",
       "service": "Transactional email provider (e.g. Resend)",
       "role": "Deliver verification and password-reset emails from a crash-safe outbox.",
-      "implementation": ["backend/pact/core/email.py", "backend/pact/scripts/dispatch_email.py"],
+      "implementation": ["backend/pact/core/email.py", "backend/scripts/dispatch_email.py"],
       "config": ["PACT_EMAIL_PROVIDER", "PACT_EMAIL_API_KEY", "PACT_EMAIL_FROM", "PACT_EMAIL_BASE_URL", "PACT_EMAIL_WEBHOOK_SECRET"],
       "required": "Optional; off by default. Customer self-service auth is disabled without it.",
       "status": "implemented_partially_verified"
