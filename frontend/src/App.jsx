@@ -25,6 +25,7 @@ import PaymentStatus from './components/PaymentStatus'
 import Verification, { EscrowRecord } from './components/Verification'
 import Ledger from './components/Ledger'
 import Reputation from './components/Reputation'
+import Welcome from './components/Welcome'
 
 const TABS = [
   { id: 'negotiation', label: 'Negotiation' },
@@ -249,6 +250,15 @@ export default function App() {
     return viewJob.ledger_chain_valid !== false
   }, [viewJob])
 
+  // The welcome CTA points at the real control rather than duplicating it: it
+  // scrolls to the job composer and puts the caret in the first field.
+  const focusComposer = useCallback(() => {
+    const el = document.getElementById('composer-title')
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.focus({ preventScroll: true })
+  }, [])
+
   return (
     <div className="min-h-screen bg-ink-950 grain">
       <Header health={health} live={live} guest={session.status === 'ready' && session.type === 'guest'} onDisconnect={token ? () => connect('') : null} />
@@ -341,20 +351,27 @@ export default function App() {
                         >
                           {t.label}
                           {t.id === 'ledger' && viewJob.ledger?.length > 0 && (
-                            <span className="tnum opacity-60">{viewJob.ledger.length}</span>
+                            <span className="tnum text-paper-faint">{viewJob.ledger.length}</span>
                           )}
                         </button>
                       ))}
                     </div>
                     {live && (
-                      <span className="chip bg-paypal-deep/40 text-paypal-bright ring-1 ring-paypal/40">
+                      <span className="chip-static bg-paypal-deep/40 text-paypal-bright ring-1 ring-paypal/40">
                         <span className="live-dot h-1.5 w-1.5 rounded-full bg-current" />
                         live
                       </span>
                     )}
                   </div>
 
-                  <div className="max-h-[620px] overflow-y-auto">
+                  {/* A scroll region must be reachable by keyboard so it can be
+                      scrolled without a pointer (WCAG 2.1.1 / 2.5.8). */}
+                  <div
+                    className="max-h-[620px] overflow-y-auto"
+                    tabIndex={0}
+                    role="region"
+                    aria-label={`${TABS.find((t) => t.id === tab)?.label ?? 'Details'} panel`}
+                  >
                     {tab === 'negotiation' && <Negotiation job={viewJob} />}
                     {tab === 'verification' && <Verification job={viewJob} />}
                     {tab === 'ledger' && (
@@ -364,12 +381,15 @@ export default function App() {
                 </div>
               </>
             ) : (
-              <div className="panel">
-                <Empty
-                  title="No settlement selected"
-                  body="Post a job to watch agents negotiate a price, hold funds in PayPal escrow, verify the delivery, and release payment."
-                />
-              </div>
+              <>
+                {jobs.length === 0 && <Welcome onStart={focusComposer} />}
+                <div className="panel">
+                  <Empty
+                    title="No settlement selected"
+                    body="Post a job to watch agents negotiate a price, hold funds in PayPal escrow, verify the delivery, and release payment."
+                  />
+                </div>
+              </>
             )}
 
             <JobsTable jobs={jobs} activeId={job?.id} onOpen={openJob} />
@@ -476,7 +496,7 @@ function Header({ health, live, guest, onDisconnect }) {
         <div className="flex flex-wrap items-center justify-end gap-2">
           {guest && (
             <span
-              className="chip hidden bg-ink-800 text-paper-faint ring-1 ring-ink-600 sm:inline-flex"
+              className="chip-static hidden bg-ink-800 text-paper-faint ring-1 ring-ink-600 sm:inline-flex"
               title="You are in a private guest workspace. Your jobs, payments and ledger are visible only to this browser session."
             >
               Guest workspace
@@ -498,7 +518,7 @@ function Header({ health, live, guest, onDisconnect }) {
           )}
           {llmMock && (
             <span
-              className="chip bg-ink-800 text-paper-faint ring-1 ring-ink-600"
+              className="chip-static bg-ink-800 text-paper-faint ring-1 ring-ink-600"
               title="No LLM_API_KEY configured. Agents fall back to a deterministic policy engine so the full lifecycle still runs."
             >
               Mock agents
@@ -515,7 +535,7 @@ function Header({ health, live, guest, onDisconnect }) {
             </button>
           )}
           {live && (
-            <span className="chip bg-released-dim text-released ring-1 ring-released/40">
+            <span className="chip-static bg-released-dim text-released ring-1 ring-released/40">
               <span className="live-dot h-1.5 w-1.5 rounded-full bg-current" />
               settling
             </span>

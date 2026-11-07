@@ -23,7 +23,7 @@ const ESCROW_TONE = {
 export function EscrowBadge({ state }) {
   const tone = ESCROW_TONE[state] ?? ESCROW_TONE.none
   return (
-    <span className={`chip ring-1 ${tone.bg} ${tone.ring} ${tone.text}`}>
+    <span className={`chip-static ring-1 ${tone.bg} ${tone.ring} ${tone.text}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
       {tone.label}
     </span>
@@ -35,7 +35,7 @@ export function ModeBadge({ mode }) {
   const simulated = mode === 'mock'
   return (
     <span
-      className={`chip ring-1 ${
+      className={`chip-static ring-1 ${
         simulated ? 'bg-ink-800 text-paper-faint ring-ink-600' : 'bg-paypal-deep/40 text-paypal-bright ring-paypal/40'
       }`}
       title={
@@ -65,7 +65,7 @@ export function StatusPill({ status }) {
     failed: 'bg-voided-dim text-voided ring-voided/40',
   }
   return (
-    <span className={`chip ring-1 capitalize ${tones[status] ?? tones.open}`}>
+    <span className={`chip-static ring-1 capitalize ${tones[status] ?? tones.open}`}>
       {status.replace(/_/g, ' ')}
     </span>
   )
@@ -130,7 +130,7 @@ export function Lifecycle({ job }) {
                 : 'border-paypal/40 bg-paypal-deep/30 text-paypal-bright'
         return (
           <li key={step.key} className="flex items-center gap-1.5">
-            <span className={`chip border px-2 py-1 ${tone}`}>
+            <span className={`chip-static border px-2 py-1 ${tone}`}>
               <span className="tnum opacity-60">{i + 1}</span>
               {step.label}
             </span>

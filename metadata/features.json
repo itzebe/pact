@@ -175,7 +175,7 @@
       "description": "React/Vite/Tailwind UI: composer, negotiation, verification, ledger, payment panel, reputation.",
       "implementation": ["frontend/src/"],
       "status": "implemented_verified",
-      "evidence": ["frontend/test/*.js (40 tests)", "live: production root returns 200"]
+      "evidence": ["frontend/test/*.js (43 tests)", "live: production root returns 200"]
     },
     {
       "id": "customer_accounts",
