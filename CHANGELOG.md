@@ -18,8 +18,13 @@ the `master` branch. The latest merge on `master` is **PR #29**
   environment from `paypal.sandbox_only`, which is the (off-by-default) guard switch;
   `sandbox_only: false` on a safe sandbox deployment could previously be misread as
   "live money". See `docs/architecture-decisions/0007-health-reports-is-live.md`.
+- An unrecognised `PAYPAL_ENVIRONMENT` (a typo such as `production`, an empty string)
+  is now **refused at startup** in every environment, and `paypal.is_live` reports
+  `true` for it, so an ambiguous configuration can never be presented as a safe
+  sandbox one. The client only resolves a host for `sandbox`/`live`; previously any
+  other value silently resolved to the sandbox host while reporting `is_live: false`.
 - Documentation updated to explain the distinction: `docs/api/README.md`,
-  `docs/security.md`, `docs/faq.md`. Regression coverage added in
+  `docs/security.md`, `docs/faq.md`, `docs/deployment.md`. Regression coverage added in
   `tests/test_paypal_sandbox_config.py`.
 
 ### Added — canonical documentation system (this change)

@@ -78,6 +78,10 @@ is `sandbox`, `paypal.is_live` is `false`, and `paypal.mode` is `sandbox`. Note 
 switched on, not whether the deployment is live; `paypal.is_live` is the indicator
 that answers that question.
 
+`PAYPAL_ENVIRONMENT` must be exactly `sandbox` or `live`. Any other value (a typo such
+as `production`) is refused at startup, and `paypal.is_live` reports `true` for it, so
+a mistyped environment can never be presented as a safe sandbox one.
+
 ## How does capture work?
 
 When verification passes, PACT captures the authorization

@@ -14,15 +14,15 @@
       "name": "backend_filesystem",
       "command": "cd backend && python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true PACT_AUTH_SECRET=<test>",
-      "result": "483 passed, 94 skipped",
+      "result": "487 passed, 94 skipped",
       "note": "The 94 skips are the PostgreSQL integration tests, which skip themselves when no database is reachable."
     },
     {
       "name": "backend_postgres",
       "command": "cd backend && DATABASE_URL=postgresql://... python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17",
-      "result": "571 passed, 6 skipped",
-      "note": "The skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides. With PgBouncer in transaction mode the same suite is 576 passed, 1 skipped."
+      "result": "575 passed, 6 skipped",
+      "note": "The skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides. With PgBouncer in transaction mode the same suite is 580 passed, 1 skipped."
     },
     {
       "name": "frontend_unit",

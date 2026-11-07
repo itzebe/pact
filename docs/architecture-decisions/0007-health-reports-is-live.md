@@ -28,6 +28,18 @@ guard state stays observable, and document the distinction in `docs/api/README.m
 `is_live` is derived, not configured: it cannot drift from the host the client will
 actually call, because the client and the field read the same property.
 
+### Follow-up (same PR): fail closed on an unrecognised environment
+
+Writing `is_live` as `environment == "live"` exposed a second ambiguity. The client
+only resolves a host for `sandbox` and `live`; any other value — `production`, a typo,
+a stray space, an empty string — fell through to the **sandbox** host while `is_live`
+reported `false`. That is precisely the failure this ADR is about: an invalid
+configuration presented as a safe sandbox one. `is_live` is now `environment !=
+"sandbox"` (so an unknown value reads as live), and `validate_runtime` refuses any
+`PAYPAL_ENVIRONMENT` outside `{sandbox, live}` at startup, in every environment, unless
+an explicit `PAYPAL_BASE_URL` names the host directly. See
+`PAYPAL_ENVIRONMENTS` in `backend/pact/config.py`.
+
 ## Consequences
 
 - A correct sandbox deployment now reads `environment: "sandbox"`, `is_live: false`,
@@ -39,7 +51,10 @@ actually call, because the client and the field read the same property.
 - Regression coverage is pinned in `tests/test_paypal_sandbox_config.py`
   (`test_sandbox_only_false_does_not_mean_live_money`,
   `test_the_health_surface_reports_whether_it_resolves_to_a_live_host`,
-  `test_is_live_tracks_the_configured_environment`).
+  `test_is_live_tracks_the_configured_environment`,
+  `test_an_unrecognised_environment_is_not_presented_as_sandbox`,
+  `test_an_unrecognised_environment_is_refused_at_startup`,
+  `test_the_two_known_environments_are_accepted`).
 
 ## Alternatives considered
 

@@ -111,6 +111,11 @@ list.
 **Never set `PAYPAL_ENVIRONMENT=live`.** Startup refuses guest sessions against a live
 host, and `PACT_PAYPAL_SANDBOX_ONLY` refuses a live host outright.
 
+`PAYPAL_ENVIRONMENT` must be exactly `sandbox` or `live`. Any other value (including a
+typo such as `production`) is refused at startup in every environment, so a
+misconfiguration cannot silently talk to the sandbox host while reporting itself as
+safe. See `docs/security.md` → *Sandbox-only guard*.
+
 ## Build process
 
 1. **Frontend:** `npm --prefix frontend ci` then `npm --prefix frontend run build`

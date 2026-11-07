@@ -59,6 +59,12 @@ def _env_float(name: str, default: float) -> float:
 PAYPAL_SANDBOX_HOST = "api-m.sandbox.paypal.com"
 PAYPAL_LIVE_HOST = "api-m.paypal.com"
 
+# The only ``PAYPAL_ENVIRONMENT`` values this client knows how to resolve to a host.
+# ``is_live`` treats any other value as live (fail closed), and ``validate_runtime``
+# refuses it at startup: without that, a typo such as ``production`` would resolve to
+# the sandbox host while being *reported* as a safe sandbox deployment.
+PAYPAL_ENVIRONMENTS = ("sandbox", "live")
+
 
 def _is_local_or_sandbox_host(url: str) -> bool:
     """Whether an API base is the sandbox host or a loopback/private test host.
@@ -128,10 +134,16 @@ class PayPalSettings:
         An explicit ``PAYPAL_BASE_URL`` that is not the sandbox host counts as live
         unless it is a loopback/private host used by tests, so an override cannot be
         used to slip past the sandbox-only guard.
+
+        An unrecognised ``environment`` is treated as live rather than sandbox: the
+        client only resolves a host for ``sandbox``/``live``, so any other value is a
+        misconfiguration, and reporting it as *not* live would present an ambiguous
+        deployment as a safe one. ``validate_runtime`` refuses such a value at
+        startup, so this is the fail-closed default, not the expected path.
         """
         if self.base_url_override:
             return not _is_local_or_sandbox_host(self.base_url_override)
-        return self.environment == "live"
+        return self.environment != "sandbox"
 
     @property
     def base_url(self) -> str:
@@ -394,6 +406,20 @@ class Settings:
             problems.append(
                 "PACT_PAYPAL_SANDBOX_ONLY is set but the PayPal configuration resolves "
                 "to a live host; refusing to talk to production PayPal"
+            )
+        # An unrecognised PAYPAL_ENVIRONMENT is refused rather than guessed at. The
+        # client only resolves a host for "sandbox"/"live"; any other value (a typo
+        # such as "production", a stray space, an empty string) would otherwise
+        # silently talk to the sandbox host while being *reported* as a safe sandbox
+        # deployment — the ambiguous configuration presented as a safe one that the
+        # sandbox-only design exists to prevent. Checked in every environment so a
+        # developer laptop fails the same way. An explicit PAYPAL_BASE_URL makes the
+        # environment irrelevant, so it is exempt.
+        if not self.paypal.base_url_override and self.paypal.environment not in PAYPAL_ENVIRONMENTS:
+            problems.append(
+                f"PAYPAL_ENVIRONMENT {self.paypal.environment!r} is not one of "
+                f"{list(PAYPAL_ENVIRONMENTS)}; refusing to guess whether this is a "
+                "sandbox or a live PayPal deployment"
             )
         # Anonymous guests must never be able to drive a real-money capture. Sandbox
         # money is fine to expose publicly; live money is not, so a deployment that
