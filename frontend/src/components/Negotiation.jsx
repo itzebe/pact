@@ -52,7 +52,7 @@ export default function Negotiation({ job }) {
                           {isBuyer ? role.name : m.agent_id}
                         </span>
                         {accepted && (
-                          <span className="chip bg-released-dim text-released ring-1 ring-released/40">accepted</span>
+                          <span className="chip-static bg-released-dim text-released ring-1 ring-released/40">accepted</span>
                         )}
                       </div>
                       <div className="mt-0.5 text-sm text-paper">{m.text}</div>

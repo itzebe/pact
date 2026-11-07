@@ -16,7 +16,11 @@ export default {
         paper: {
           DEFAULT: '#eef1f6',
           dim: '#a7b0c0',
-          faint: '#6b7488',
+          // #9099ab clears WCAG 2.2 AA (>= 4.5:1) on every surface in the palette
+          // (6.02:1 on ink-800 … 6.95:1 on ink-950). The previous #6b7488 measured
+          // 3.67–4.25:1 and failed the audit. It stays clearly below `dim` so the
+          // three-step text hierarchy is preserved.
+          faint: '#9099ab',
         },
         paypal: { DEFAULT: '#0070ba', bright: '#2b9fe0', deep: '#003087' },
         held: { DEFAULT: '#e8b53c', dim: '#3a2f14' },

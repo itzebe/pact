@@ -85,7 +85,7 @@ export default function Ledger({ job, entries, chainValid }) {
         headerBackgroundColor: 'transparent',
         borderColor: '#232936',
         rowBorder: { color: '#171b24' },
-        headerTextColor: '#6b7488',
+        headerTextColor: '#9099ab',
         foregroundColor: '#eef1f6',
         fontFamily: 'inherit',
         fontSize: 12.5,
@@ -111,9 +111,8 @@ export default function Ledger({ job, entries, chainValid }) {
           columnDefs={columnDefs}
           defaultColDef={{ resizable: true, sortable: true, suppressHeaderMenuButton: true }}
           animateRows
-          suppressCellFocus
           getRowId={(p) => String(p.data.seq)}
-          overlayNoRowsTemplate="<span style='color:#6b7488;font-size:12px'>No ledger entries yet</span>"
+          overlayNoRowsTemplate="<span style='color:#9099ab;font-size:12px'>No ledger entries yet</span>"
         />
       </div>
       <div className="flex items-center justify-between border-t border-ink-800 px-4 py-2.5">

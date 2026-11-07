@@ -103,7 +103,13 @@ export default function Composer({ onRun, busy, health }) {
 
       <div className="space-y-3.5 px-4 py-4">
         <Field label="Deliverable">
-          <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} />
+          <input
+            id="composer-title"
+            className="field"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={200}
+          />
         </Field>
 
         <Field label="Brief">

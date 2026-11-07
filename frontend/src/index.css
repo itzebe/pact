@@ -35,24 +35,44 @@
   .label {
     @apply text-2xs font-medium uppercase tracking-[0.14em] text-paper-faint;
   }
+  /* Interactive chips carry a real touch target. WCAG 2.2 AA (2.5.8) asks for
+     24x24 CSS px; the previous py-0.5 chips were 20px tall. `.chip-static` is the
+     non-interactive badge, which is exempt and keeps the tighter metric. */
   .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-2xs font-medium;
+  }
+  .chip-static {
     @apply inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-2xs font-medium;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors
            disabled:cursor-not-allowed disabled:opacity-40;
   }
+  /* White on the brand blue is 4.52:1; the brighter hover tone only reaches 3.22:1,
+     so it is reserved for accents and the primary fill is used for the label. */
   .btn-primary {
-    @apply btn bg-paypal text-white hover:bg-paypal-bright;
+    @apply btn bg-paypal text-white hover:bg-paypal/90;
   }
   .btn-ghost {
     @apply btn border border-ink-600 text-paper-dim hover:border-ink-500 hover:text-paper;
   }
   .field {
     @apply w-full rounded-lg border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-paper
-           placeholder:text-paper-faint focus:border-paypal focus:outline-none;
+           placeholder:text-paper-faint focus:border-paypal;
   }
   .rule { @apply h-px w-full bg-ink-700; }
+}
+
+@layer base {
+  /* Keyboard focus is never invisible. Nothing in the app removed the outline
+     intentionally, but `focus:outline-none` on fields left keyboard users with
+     only a border tint, and interactive chips had no focus style at all. A single
+     focus-visible ring restores it everywhere and only shows for keyboard/AT use. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid theme('colors.paypal.bright');
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
 }
 
 @layer utilities {
