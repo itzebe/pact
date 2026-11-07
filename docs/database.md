@@ -17,7 +17,15 @@ No real production data is reproduced here; only the schema and its purpose.
 - **Driver:** `psycopg` 3 with `psycopg_pool` (bounded per-instance pool).
 - **Pool sizing:** `PACT_PG_POOL_MAX_SIZE` (default 5) is a *per-instance* cap. The
   fleet's worst case is `active instances × max_size`; budget it against the database
-  plan.
+  plan. `PACT_PG_POOL_MIN_SIZE` (default 0), `PACT_PG_POOL_TIMEOUT_SECONDS` (default
+  5.0, how long a caller waits for a connection) and `PACT_PG_POOL_MAX_IDLE_SECONDS`
+  (default 300, recycle an idle connection so a database restart or compute suspend
+  does not hand back a dead one) tune the same pool. All four are read by
+  `core.pool.get_pool` and applied to every store's shared pool; an explicit keyword
+  to `get_pool` overrides the setting. A value the driver would reject (a non-positive
+  `max_size`, a negative size, a negative timeout, or `min_size > max_size`) is
+  reported by `Settings.validate_runtime` and refuses a production boot rather than
+  raising later on the first query.
 - **Statement timeout:** applied with `SET LOCAL` inside a transaction per checkout
   (`PACT_PG_STATEMENT_TIMEOUT_MS`), never as a libpq startup parameter, because a
   managed pooler rejects that and every connection would fail.

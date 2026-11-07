@@ -33,6 +33,27 @@ def _optional_int(name: str) -> int | None:
     return int(raw)
 
 
+def _env_int(name: str, default: int) -> int:
+    """An int from the environment, or ``default`` when unset/blank.
+
+    A set-but-unparseable value is a typo the operator must see, so it raises at
+    import rather than falling back silently to the default (which would look
+    operational while being ignored).
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return int(raw)
+
+
+def _env_float(name: str, default: float) -> float:
+    """A float from the environment, or ``default`` when unset/blank. See ``_env_int``."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return float(raw)
+
+
 # PayPal's two API hosts. The sandbox host is the only one this project should ever
 # talk to during sandbox work; the live host moves real money.
 PAYPAL_SANDBOX_HOST = "api-m.sandbox.paypal.com"
@@ -300,16 +321,19 @@ class Settings:
     # A *per-instance* cap. The worst case across a serverless fleet is
     # ``active function instances x max_size``; budget it against the database
     # plan (see docs/AUTH.md). A pool is not a global connection limit.
-    pg_pool_max_size: int = field(default_factory=lambda: int(os.getenv("PACT_PG_POOL_MAX_SIZE", "5")))
-    pg_pool_min_size: int = field(default_factory=lambda: int(os.getenv("PACT_PG_POOL_MIN_SIZE", "0")))
+    # These values are passed to ``core.pool.get_pool``; a malformed one (a value
+    # the driver would reject) is reported by ``validate_runtime`` and refuses a
+    # production boot rather than failing later on the first query.
+    pg_pool_max_size: int = field(default_factory=lambda: _env_int("PACT_PG_POOL_MAX_SIZE", 5))
+    pg_pool_min_size: int = field(default_factory=lambda: _env_int("PACT_PG_POOL_MIN_SIZE", 0))
     pg_pool_timeout_seconds: float = field(
-        default_factory=lambda: float(os.getenv("PACT_PG_POOL_TIMEOUT_SECONDS", "5.0"))
+        default_factory=lambda: _env_float("PACT_PG_POOL_TIMEOUT_SECONDS", 5.0)
     )
     pg_pool_max_idle_seconds: float = field(
-        default_factory=lambda: float(os.getenv("PACT_PG_POOL_MAX_IDLE_SECONDS", "300"))
+        default_factory=lambda: _env_float("PACT_PG_POOL_MAX_IDLE_SECONDS", 300.0)
     )
     pg_statement_timeout_ms: int = field(
-        default_factory=lambda: int(os.getenv("PACT_PG_STATEMENT_TIMEOUT_MS", "10000"))
+        default_factory=lambda: _env_int("PACT_PG_STATEMENT_TIMEOUT_MS", 10_000)
     )
     # psycopg3 prepares a statement server-side after this many executions. Behind
     # a transaction-mode pooler that is unsafe: the pooler hands a *server*
@@ -412,6 +436,39 @@ class Settings:
             problems.append(
                 f"PACT_AUTH_ALGORITHM {self.auth.algorithm!r} is not one of "
                 f"{sorted(ALLOWED_AUTH_ALGORITHMS)}; refusing to verify tokens with it"
+            )
+        # Pool limits are passed straight to the driver, which rejects an impossible
+        # combination by raising at pool construction — i.e. on the first database
+        # access, deep in a request. Catch it at startup instead. Checked in every
+        # environment because a malformed value is a typo, not a deployment choice.
+        if self.pg_pool_max_size < 1:
+            problems.append(
+                f"PACT_PG_POOL_MAX_SIZE must be at least 1, got {self.pg_pool_max_size}"
+            )
+        if self.pg_pool_min_size < 0:
+            problems.append(
+                f"PACT_PG_POOL_MIN_SIZE cannot be negative, got {self.pg_pool_min_size}"
+            )
+        if self.pg_pool_min_size > self.pg_pool_max_size:
+            problems.append(
+                "PACT_PG_POOL_MIN_SIZE "
+                f"({self.pg_pool_min_size}) cannot exceed PACT_PG_POOL_MAX_SIZE "
+                f"({self.pg_pool_max_size})"
+            )
+        if self.pg_pool_timeout_seconds < 0:
+            problems.append(
+                "PACT_PG_POOL_TIMEOUT_SECONDS cannot be negative, got "
+                f"{self.pg_pool_timeout_seconds}"
+            )
+        if self.pg_pool_max_idle_seconds < 0:
+            problems.append(
+                "PACT_PG_POOL_MAX_IDLE_SECONDS cannot be negative, got "
+                f"{self.pg_pool_max_idle_seconds}"
+            )
+        if self.pg_statement_timeout_ms < 0:
+            problems.append(
+                "PACT_PG_STATEMENT_TIMEOUT_MS cannot be negative, got "
+                f"{self.pg_statement_timeout_ms}"
             )
         return problems
 

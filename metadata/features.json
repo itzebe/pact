@@ -194,6 +194,15 @@
       "status": "implemented_partially_verified",
       "evidence": ["backend/tests/test_settlement_pooling.py"],
       "note": "These tests run only when PGBOUNCER_URL is set (the CI job provides it); a bare local run skips 5 tests."
+    },
+    {
+      "id": "pool_configuration",
+      "name": "Configurable pool limits",
+      "description": "Operator-set PACT_PG_POOL_* / PACT_PG_STATEMENT_TIMEOUT_MS are applied to the shared connection pool; an explicit keyword overrides them, and an impossible value is rejected at startup.",
+      "implementation": ["backend/pact/config.py", "backend/pact/core/pool.py"],
+      "status": "implemented_verified",
+      "evidence": ["backend/tests/test_pool_config.py"],
+      "note": "Previously a known gap: the settings were defined but never passed to get_pool."
     }
   ],
   "not_implemented": [
