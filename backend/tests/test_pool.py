@@ -116,3 +116,68 @@ def test_an_unreachable_dsn_raises_the_driver_error_not_a_pool_timeout():
         DatabasePool("postgresql://nobody:nobody@127.0.0.1:1/absent", timeout_seconds=2)
     # The message names the connection failure, not an opaque PoolTimeout.
     assert "refused" in str(excinfo.value).lower() or "connect" in str(excinfo.value).lower()
+
+
+def test_a_pooled_connection_never_prepares_statements_server_side():
+    """Regression: the pool disables psycopg3's automatic statement preparation.
+
+    psycopg3 prepares a statement after 5 executions and names it ``_pg3_0``.
+    Behind a transaction-mode pooler that name outlives the client that created
+    it: the pooler hands the same *server* connection to the next client, whose
+    fresh session re-issues ``PREPARE _pg3_0`` and raises
+    ``DuplicatePreparedStatement`` (reproduced locally with a size-1 pooler — see
+    the module docstring of ``test_settlement_pooling``). The pool therefore
+    disables preparation, so no ``_pg3_`` statement is ever created.
+
+    A direct endpoint is used here so the assertion sees only this connection's
+    statements, not a neighbour's leftovers on a shared pooler connection.
+    """
+    from pact.core.pool import DatabasePool
+
+    pool = DatabasePool(DATABASE_URL, max_size=1)
+    try:
+        with pool.connection() as conn, conn.cursor() as cur:
+            for i in range(8):  # more than the driver default threshold of 5
+                cur.execute("SELECT %s::int", (i,))
+                cur.fetchall()
+            cur.execute("SELECT count(*) FROM pg_prepared_statements WHERE name ~ '^_pg3_'")
+            assert cur.fetchone()[0] == 0, "a pooled connection prepared a statement"
+    finally:
+        pool.close()
+
+
+def test_the_driver_prepares_by_default_so_disabling_it_is_load_bearing():
+    """Negative control for the test above.
+
+    Proves psycopg3 *does* prepare by default, so the pool's ``prepare_threshold``
+    is doing real work rather than passing because the driver never prepares.
+    """
+    import psycopg
+
+    conn = psycopg.connect(DATABASE_URL)  # driver default: prepare after 5 executions
+    try:
+        with conn.cursor() as cur:
+            for i in range(8):
+                cur.execute("SELECT %s::int", (i,))
+                cur.fetchall()
+            cur.execute("SELECT count(*) FROM pg_prepared_statements WHERE name ~ '^_pg3_'")
+            assert cur.fetchone()[0] >= 1, "the driver did not prepare; the control is void"
+    finally:
+        conn.close()
+
+
+def test_prepare_threshold_config_disables_preparation_by_default(monkeypatch):
+    """The env var must map an unset/``none`` value to ``None``, never to ``0``.
+
+    With psycopg3 ``prepare_threshold=0`` means "prepare on the first execution",
+    the opposite of disabling preparation, so a naive ``int(os.getenv(...) or 0)``
+    would re-introduce the pooler bug.
+    """
+    from pact.config import _optional_int
+
+    monkeypatch.delenv("PACT_PG_PREPARE_THRESHOLD", raising=False)
+    assert _optional_int("PACT_PG_PREPARE_THRESHOLD") is None
+    monkeypatch.setenv("PACT_PG_PREPARE_THRESHOLD", "none")
+    assert _optional_int("PACT_PG_PREPARE_THRESHOLD") is None
+    monkeypatch.setenv("PACT_PG_PREPARE_THRESHOLD", "5")
+    assert _optional_int("PACT_PG_PREPARE_THRESHOLD") == 5

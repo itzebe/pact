@@ -21,6 +21,13 @@ No real production data is reproduced here; only the schema and its purpose.
 - **Statement timeout:** applied with `SET LOCAL` inside a transaction per checkout
   (`PACT_PG_STATEMENT_TIMEOUT_MS`), never as a libpq startup parameter, because a
   managed pooler rejects that and every connection would fail.
+- **Prepared statements:** psycopg3's automatic server-side preparation is
+  **disabled** (`PACT_PG_PREPARE_THRESHOLD=none`) on every pooled connection. Behind
+  a transaction-mode pooler the pooler hands the same server connection to a
+  different client between transactions; a statement prepared by one client (`_pg3_0`)
+  then collides with the next client's identically named one and raises
+  `DuplicatePreparedStatement`. Set a positive integer only for an endpoint you know
+  is a direct session.
 
 When `DATABASE_URL` is unset, the stores fall back to the filesystem
 (`PACT_DATA_DIR`). Production startup refuses to run without a database (see

@@ -21,8 +21,8 @@
       "name": "backend_postgres",
       "command": "cd backend && DATABASE_URL=postgresql://... python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17",
-      "result": "550 passed, 5 skipped",
-      "note": "The 5 skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides."
+      "result": "553 passed, 6 skipped",
+      "note": "The skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides. With PgBouncer in transaction mode the same suite is 558 passed, 1 skipped."
     },
     {
       "name": "frontend_unit",
