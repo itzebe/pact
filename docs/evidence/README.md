@@ -60,9 +60,10 @@ Commands run on 2026-11-07 in the workspace container (Python 3.11.17, Node
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend (filesystem) | `python -m pytest tests/ -q` | **465 passed, 90 skipped** |
-| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **550 passed, 5 skipped** |
-| Frontend unit | `npm test` | **40 passed** |
+| Backend (filesystem) | `python -m pytest tests/ -q` | **465 passed, 94 skipped** |
+| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **553 passed, 6 skipped** |
+| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **558 passed, 1 skipped** |
+| Frontend unit | `npm test` | **43 passed** |
 | Frontend build | `npm run build` | success |
 | Lint | `python -m pyflakes pact/ scripts/` | clean |
 
