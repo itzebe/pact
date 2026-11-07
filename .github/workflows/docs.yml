@@ -1,0 +1,42 @@
+name: Docs
+
+# Validates the canonical documentation on every pull request into master and on
+# pushes to the documentation branch. Offline and fast: it parses the machine-
+# readable metadata, checks that every relative Markdown link resolves, and
+# confirms the required documentation files are present.
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "**/*.md"
+      - "metadata/**"
+      - "llms.txt"
+      - "llms-full.txt"
+      - "scripts/check_docs.py"
+      - ".github/workflows/docs.yml"
+  push:
+    branches:
+      - docs/pact-canonical-knowledge-base
+
+# Least privilege: this job only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Documentation checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate metadata, links and required files
+        run: python scripts/check_docs.py

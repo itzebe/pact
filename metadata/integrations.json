@@ -1,0 +1,90 @@
+{
+  "schema_note": "External service integrations for PACT. Each integration names the service, its role, the code that talks to it, the configuration it needs, and whether it is required. No secret values are recorded.",
+  "integrations": [
+    {
+      "id": "paypal_orders_v2",
+      "service": "PayPal Orders v2 / Payments v2",
+      "role": "The settlement rail: create an AUTHORIZE order, authorize (hold), capture (release), void (return), refund.",
+      "environment": "sandbox",
+      "base_url_sandbox": "https://api-m.sandbox.paypal.com",
+      "base_url_live": "https://api-m.paypal.com (never used by the demo; a guard can hard-refuse it)",
+      "implementation": ["backend/pact/paypal/escrow.py"],
+      "config": ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_ENVIRONMENT", "PAYPAL_WEBHOOK_ID", "PACT_PAYPAL_SANDBOX_ONLY"],
+      "required": "Required for real sandbox settlement; optional (mock used) otherwise.",
+      "endpoints_used": [
+        "POST /v1/oauth2/token",
+        "POST /v2/checkout/orders",
+        "POST /v2/checkout/orders/{id}/authorize",
+        "POST /v2/payments/authorizations/{id}/capture",
+        "POST /v2/payments/authorizations/{id}/void",
+        "POST /v2/payments/captures/{id}/refund",
+        "GET /v2/checkout/orders/{id}",
+        "GET /v2/payments/authorizations/{id}",
+        "GET /v2/payments/captures/{id}",
+        "POST /v1/notifications/verify-webhook-signature"
+      ],
+      "idempotency": "PayPal-Request-Id on every mutating call"
+    },
+    {
+      "id": "paypal_webhooks",
+      "service": "PayPal webhooks",
+      "role": "Notification of payment state changes; verified and applied at most once. Never moves money on its own.",
+      "implementation": ["backend/pact/api/routes.py", "backend/pact/core/webhooks.py", "backend/pact/core/webhook_store.py"],
+      "config": ["PAYPAL_WEBHOOK_ID"],
+      "required": "Optional; without a webhook id every event is refused (fail closed).",
+      "handled_event_types": [
+        "PAYMENT.CAPTURE.COMPLETED",
+        "PAYMENT.CAPTURE.DENIED",
+        "PAYMENT.CAPTURE.REFUNDED",
+        "PAYMENT.CAPTURE.REVERSED",
+        "PAYMENT.AUTHORIZATION.VOIDED",
+        "PAYMENT.AUTHORIZATION.CREATED",
+        "PAYMENT.AUTHORIZATION.EXPIRED",
+        "CHECKOUT.ORDER.APPROVED",
+        "CHECKOUT.ORDER.COMPLETED"
+      ]
+    },
+    {
+      "id": "llm_openai_compatible",
+      "service": "OpenAI-compatible chat completions endpoint",
+      "role": "Seller quoting, buyer countering, deliverable production, and verification.",
+      "deployed_provider": "Groq (openai/gpt-oss-20b)",
+      "implementation": ["backend/pact/core/llm.py"],
+      "config": ["LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_TEMPERATURE", "LLM_TIMEOUT"],
+      "required": "Optional; without a key a deterministic mock policy engine runs."
+    },
+    {
+      "id": "postgresql",
+      "service": "PostgreSQL",
+      "role": "Durable, shared state: jobs, reputation, webhook events, tickets, accounts.",
+      "implementation": ["backend/pact/core/dbstore.py", "backend/pact/core/pool.py", "backend/pact/core/auth_store.py", "backend/pact/core/webhook_store.py", "backend/pact/core/ticket_store.py"],
+      "config": ["DATABASE_URL", "DATABASE_URL_UNPOOLED", "PACT_PG_POOL_MAX_SIZE", "PACT_PG_STATEMENT_TIMEOUT_MS"],
+      "required": "Required in production; optional (filesystem fallback) in development."
+    },
+    {
+      "id": "transactional_email",
+      "service": "Transactional email provider (e.g. Resend)",
+      "role": "Deliver verification and password-reset emails from a crash-safe outbox.",
+      "implementation": ["backend/pact/core/email.py", "backend/pact/scripts/dispatch_email.py"],
+      "config": ["PACT_EMAIL_PROVIDER", "PACT_EMAIL_API_KEY", "PACT_EMAIL_FROM", "PACT_EMAIL_BASE_URL", "PACT_EMAIL_WEBHOOK_SECRET"],
+      "required": "Optional; off by default. Customer self-service auth is disabled without it.",
+      "status": "implemented_partially_verified"
+    },
+    {
+      "id": "vercel",
+      "service": "Vercel",
+      "role": "Hosting: the Python function (api/index.py) and the static SPA.",
+      "implementation": ["vercel.json", "api/index.py"],
+      "config": ["DATABASE_URL", "PACT_AUTH_SECRET", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "LLM_API_KEY"],
+      "required": "The production host."
+    },
+    {
+      "id": "github_actions",
+      "service": "GitHub Actions",
+      "role": "CI: backend with PostgreSQL 16 + PgBouncer, frontend, Docker image; documentation checks.",
+      "implementation": [".github/workflows/ci.yml", ".github/workflows/docs.yml"],
+      "required": "CI only."
+    }
+  ],
+  "reference": "docs/architecture.md"
+}

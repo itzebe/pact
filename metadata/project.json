@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_note": "Project identity and high-level metadata for PACT. Fields are descriptive; status values are defined in metadata/features.json.",
+  "identity": {
+    "name": "PACT",
+    "tagline": "Conditional settlement infrastructure for the agent economy, built on PayPal escrow.",
+    "category": "agent-payments",
+    "subcategory": "escrow-conditional-settlement",
+    "product_type": "guest-first work coordination and escrow platform"
+  },
+  "repository": {
+    "url": "https://github.com/itzebe/pact",
+    "default_branch": "master",
+    "license": "MIT",
+    "language": "Python",
+    "visibility": "public",
+    "latest_known_master_commit": "4ce1faf",
+    "latest_known_master_pr": 25,
+    "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time."
+  },
+  "production": {
+    "url": "https://pact-flame.vercel.app/",
+    "health_endpoint": "https://pact-flame.vercel.app/api/health",
+    "hosting": "Vercel",
+    "database": "PostgreSQL (Neon-compatible)",
+    "payment_environment": "PayPal Sandbox",
+    "verified_at": "2026-11-07",
+    "verified_health": {
+      "status": "ok",
+      "paypal_mode": "sandbox",
+      "paypal_settlement_is_real": true,
+      "paypal_webhook_verification": true,
+      "llm_is_mock": false,
+      "llm_model": "openai/gpt-oss-20b @ https://api.groq.com/openai/v1",
+      "storage_backend": "postgres",
+      "storage_durable": true
+    }
+  },
+  "stack": {
+    "backend": ["Python 3.11", "FastAPI", "Pydantic v2", "sse-starlette", "httpx", "PyJWT", "argon2-cffi"],
+    "frontend": ["React 18", "Vite 6", "Tailwind CSS 3", "AG Grid Community"],
+    "database": ["PostgreSQL", "psycopg3", "psycopg_pool"],
+    "payments": ["PayPal Orders v2", "PayPal Payments v2"],
+    "ai": ["OpenAI-compatible chat completions", "Groq openai/gpt-oss-20b (deployed demo)"],
+    "hosting": ["Vercel", "Docker", "Render (config present)"],
+    "ci": ["GitHub Actions"]
+  },
+  "documentation": {
+    "version": "1.0.0",
+    "index": "docs/README.md",
+    "knowledge_map": "docs/knowledge-map.md",
+    "llm_discovery": ["llms.txt", "llms-full.txt"],
+    "agent_instructions": "AGENTS.md",
+    "last_verified_commit": "4ce1faf",
+    "last_verified_date": "2026-11-07"
+  },
+  "status_vocabulary": [
+    "implemented_verified",
+    "implemented_partially_verified",
+    "partially_implemented",
+    "planned",
+    "deprecated",
+    "unknown"
+  ],
+  "summary": {
+    "what": "A settlement layer for work between autonomous agents: funds are held in PayPal escrow before work starts and released only when an independent verifier confirms the delivery.",
+    "who": "Autonomous agents, marketplace developers, and evaluators.",
+    "not": "Not a generic payment gateway, not a custodian, not a crypto product, and not a real-money deployment (the demo runs on PayPal Sandbox)."
+  },
+  "related": {
+    "features": "metadata/features.json",
+    "api": "metadata/api.json",
+    "architecture": "metadata/architecture.json",
+    "integrations": "metadata/integrations.json",
+    "security_controls": "metadata/security-controls.json",
+    "evidence": "metadata/evidence.json"
+  }
+}

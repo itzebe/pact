@@ -1,0 +1,179 @@
+{
+  "schema_note": "Security controls for PACT. Each control names its category, what it does, the source that implements it, the tests that verify it, and the threats it addresses. This is an index; the authoritative description is docs/security.md.",
+  "audit_status": {
+    "third_party_audit": false,
+    "certifications": [],
+    "note": "No independent security audit or certification has been performed. Controls are implemented and tested but not externally reviewed."
+  },
+  "controls": [
+    {
+      "id": "auth_fail_closed",
+      "category": "authentication",
+      "control": "A missing PACT_AUTH_SECRET refuses every protected request (503); production refuses to start with a missing or short secret.",
+      "source": ["backend/pact/api/auth.py", "backend/pact/config.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["anonymous access to money routes"]
+    },
+    {
+      "id": "auth_algorithm_allowlist",
+      "category": "authentication",
+      "control": "Signing algorithms are restricted to HS256/HS384/HS512; a misconfigured algorithm fails closed.",
+      "source": ["backend/pact/config.py", "backend/pact/api/auth.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["algorithm-confusion / 'none' algorithm"]
+    },
+    {
+      "id": "object_level_authorization",
+      "category": "authorization",
+      "control": "Every job access checks party membership; a non-owner gets 404, not 403.",
+      "source": ["backend/pact/api/routes.py", "backend/pact/api/auth.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["IDOR / cross-tenant read and control"]
+    },
+    {
+      "id": "role_separation",
+      "category": "authorization",
+      "control": "buyer, seller, admin are distinct; reconcile/delete/provider-order require admin.",
+      "source": ["backend/pact/api/auth.py", "backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["privilege escalation from a buyer token"]
+    },
+    {
+      "id": "buyer_identity_from_token",
+      "category": "authorization",
+      "control": "buyer_id in the request body is overwritten from the token.",
+      "source": ["backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["impersonation"]
+    },
+    {
+      "id": "guest_isolation",
+      "category": "session",
+      "control": "Guests are ordinary buyers under a reserved domain; isolation is inherited from ownership checks. Cookie is HttpOnly/Secure/SameSite=Lax, scoped to /api, host-only.",
+      "source": ["backend/pact/core/guests.py", "backend/pact/api/auth.py"],
+      "tests": ["backend/tests/test_guests.py"],
+      "threats": ["cross-guest access", "cookie leakage"]
+    },
+    {
+      "id": "guest_cookie_only",
+      "category": "session",
+      "control": "A guest token presented as a bearer header is refused, closing a path around the CSRF check.",
+      "source": ["backend/pact/api/auth.py"],
+      "tests": ["backend/tests/test_guests.py"],
+      "threats": ["CSRF bypass"]
+    },
+    {
+      "id": "csrf",
+      "category": "session",
+      "control": "Cookie-authenticated mutating requests must echo the session CSRF token in X-CSRF-Token.",
+      "source": ["backend/pact/api/auth.py", "backend/pact/core/guests.py"],
+      "tests": ["backend/tests/test_guests.py"],
+      "threats": ["cross-site request forgery"]
+    },
+    {
+      "id": "webhook_signature_verification",
+      "category": "integration",
+      "control": "Webhook signatures are verified through PayPal's own verify endpoint; an unverifiable event changes nothing.",
+      "source": ["backend/pact/paypal/escrow.py", "backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_webhook_route.py"],
+      "threats": ["forged webhook moving money"]
+    },
+    {
+      "id": "webhook_exactly_once",
+      "category": "integration",
+      "control": "Each event id is claimed exactly once in a shared store; a duplicate is acknowledged and ignored.",
+      "source": ["backend/pact/core/webhooks.py", "backend/pact/core/webhook_store.py"],
+      "tests": ["backend/tests/test_webhook_persistence.py", "backend/tests/test_webhook_postgres.py"],
+      "threats": ["webhook replay / double settlement"]
+    },
+    {
+      "id": "duplicate_capture_prevention",
+      "category": "payment-integrity",
+      "control": "The authorization is claimed and persisted before the provider call; the transition is serialised on the settlement guard (a session advisory lock on PostgreSQL).",
+      "source": ["backend/pact/core/settlement.py", "backend/pact/core/dbstore.py"],
+      "tests": ["backend/tests/test_settlement_pooling.py", "backend/tests/test_settlement_webhook_race.py"],
+      "threats": ["double capture / double charge"]
+    },
+    {
+      "id": "refund_cap_and_idempotency",
+      "category": "payment-integrity",
+      "control": "Total refunds cannot exceed the captured amount; per-operation idempotency keys; provider refund id dedupe.",
+      "source": ["backend/pact/core/settlement.py"],
+      "tests": ["backend/tests/test_refund.py", "backend/tests/test_refund_route.py"],
+      "threats": ["over-refund", "duplicate refund"]
+    },
+    {
+      "id": "ambiguous_outcome_handling",
+      "category": "payment-integrity",
+      "control": "A timeout/5xx is AmbiguousOutcome -> job unresolved; never auto-retried; reconcile reads PayPal.",
+      "source": ["backend/pact/core/settlement.py", "backend/pact/paypal/escrow.py"],
+      "tests": ["backend/tests/test_ambiguous_settlement.py", "backend/tests/test_reconciliation_reputation.py"],
+      "threats": ["blind retry double-charge"]
+    },
+    {
+      "id": "verdict_fail_closed",
+      "category": "payment-integrity",
+      "control": "Model verdicts are parsed strictly (as_bool fails closed); verification is a conjunction of deterministic checks and the model verdict.",
+      "source": ["backend/pact/core/llm.py", "backend/pact/core/settlement.py"],
+      "tests": ["backend/tests/test_verdict_coercion.py"],
+      "threats": ["a malformed verdict releasing funds"]
+    },
+    {
+      "id": "sandbox_only_guard",
+      "category": "payment-integrity",
+      "control": "PACT_PAYPAL_SANDBOX_ONLY refuses a live PayPal host; startup refuses guest sessions against a live host.",
+      "source": ["backend/pact/config.py"],
+      "tests": ["backend/tests/test_security.py", "backend/tests/test_deployment_safety.py"],
+      "threats": ["accidental real-money movement"]
+    },
+    {
+      "id": "secret_redaction",
+      "category": "data-protection",
+      "control": "Health and errors expose fixed classifications, never the secret/webhook id/connection string; payer identity is redacted.",
+      "source": ["backend/pact/core/store.py", "backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["credential leakage in logs/responses"]
+    },
+    {
+      "id": "input_bounds",
+      "category": "input-validation",
+      "control": "Bounded Pydantic models; a 64 KiB body cap enforced on received bytes; a non-finite budget is a 422, not a 500.",
+      "source": ["backend/pact/main.py", "backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["memory exhaustion", "validation bypass"]
+    },
+    {
+      "id": "host_allowlist",
+      "category": "input-validation",
+      "control": "PACT_PUBLIC_URL wins for return URLs; otherwise only an allowlisted host is used, so a forged Host cannot redirect the buyer.",
+      "source": ["backend/pact/api/routes.py", "backend/pact/config.py"],
+      "tests": ["backend/tests/test_paypal_order_route.py"],
+      "threats": ["open redirect via Host header"]
+    },
+    {
+      "id": "bounded_runs",
+      "category": "availability",
+      "control": "Concurrent runs are bounded (semaphore); a run enforces its own deadline and fails the job rather than being killed mid-flight.",
+      "source": ["backend/pact/core/engine.py", "backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["resource exhaustion"]
+    },
+    {
+      "id": "single_use_stream_tickets",
+      "category": "session",
+      "control": "SSE tickets are single-use, 60 seconds, single-job, consumed in a shared store.",
+      "source": ["backend/pact/api/auth.py", "backend/pact/core/ticket_store.py"],
+      "tests": ["backend/tests/test_security.py", "backend/tests/test_ticket_store_postgres.py"],
+      "threats": ["ticket replay from a captured URL"]
+    },
+    {
+      "id": "production_requires_database",
+      "category": "availability",
+      "control": "Production refuses to start without DATABASE_URL, so the ledger is durable and the ticket registry is shared.",
+      "source": ["backend/pact/config.py"],
+      "tests": ["backend/tests/test_security.py", "backend/tests/test_deployment_safety.py"],
+      "threats": ["non-durable ledger", "process-local ticket replay"]
+    }
+  ],
+  "reference": "docs/security.md"
+}

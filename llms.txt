@@ -1,0 +1,134 @@
+# llms.txt — PACT
+
+> PACT is conditional settlement infrastructure for the agent economy: money moves
+> only when an independent verifier confirms a delivery meets the buyer's
+> acceptance criteria. Funds are held in PayPal escrow (`intent=AUTHORIZE`) before
+> work starts and released with `capture`, or returned with `void`. It is
+> guest-first — a public deployment provisions an isolated workspace with no
+> account — and runs on PayPal **Sandbox** by design.
+
+This file is the compact, machine-oriented entry point to PACT's canonical
+documentation. It follows the [llms.txt](https://llmstxt.org/) convention. A longer
+consolidated version is at [`llms-full.txt`](llms-full.txt). The full documentation
+index is [`docs/README.md`](docs/README.md) and the navigation map is
+[`docs/knowledge-map.md`](docs/knowledge-map.md).
+
+- **Repository:** https://github.com/itzebe/pact
+- **Live application:** https://pact-flame.vercel.app/
+- **Health endpoint:** https://pact-flame.vercel.app/api/health
+- **Default branch:** `master`
+- **License:** MIT
+- **Language:** Python (FastAPI backend) + JavaScript (React/Vite frontend)
+
+## What PACT is
+
+Two parties — an autonomous buyer agent and competing seller agents — agree to a
+small, well-specified deliverable. PACT holds the buyer's funds in PayPal escrow
+before any work starts, an independent verifier checks the delivery against each
+acceptance criterion, and only then does the money move: `capture` on a pass,
+`void` on a fail. Every transition is recorded in a hash-chained ledger.
+
+PACT is **not** a generic payment gateway and does **not** move real money in the
+demo. The live deployment is configured for the PayPal **Sandbox** host.
+
+## Primary purpose
+
+Provide a neutral, verifiable settlement layer for agent-to-agent work so that two
+strangers can transact without either being able to cheat the other: the seller
+cannot be paid for undelivered work, and the buyer cannot withhold payment for work
+that was delivered and verified.
+
+## Who it serves
+
+- **Autonomous agents** that hire and pay each other for small deliverables.
+- **Developers** building agent marketplaces that need a settlement primitive.
+- **Researchers and evaluators** who need a runnable, auditable reference
+  implementation of conditional (escrow) settlement on fiat rails.
+
+## Verified capabilities
+
+Each is implemented and covered by tests in this repository (see
+[`docs/implementation-status.md`](docs/implementation-status.md) for the evidence):
+
+- Guest-first isolated sessions (server-provisioned, cookie + CSRF).
+- Job creation with a brief, acceptance criteria, and a hard budget ceiling.
+- Multi-round seller negotiation with an in-code budget guardrail.
+- PayPal escrow: order → buyer approval → authorization (hold) → capture | void.
+- Delivery production by a seller agent and independent verification.
+- Partial and full refunds of a captured payment.
+- PayPal webhook signature verification and exactly-once event processing.
+- Hash-chained, tamper-evident audit ledger (`verify_chain`).
+- Durable, instance-safe PostgreSQL persistence (session advisory lock on a direct
+  connection) with a filesystem fallback for single-instance use.
+- Fail-closed security: missing auth secret refuses requests; production refuses a
+  live PayPal host, a mock settlement, or a missing database.
+
+## Important limitations
+
+- **Sandbox only.** The demo moves no real money; the client is configured for the
+  PayPal Sandbox host and a sandbox-only guard can hard-refuse a live host.
+- **No independent security audit or certification.** Security controls are
+  implemented and tested but have not been audited by a third party.
+- **The verifier is a model plus deterministic checks.** It is not a formal
+  correctness proof of a deliverable.
+- **Customer self-service accounts and transactional email are implemented but
+  disabled by default** because they require a verified email sending domain.
+- **No wallet or fiat payout logic.** PACT does not hold funds itself; PayPal does.
+
+## Key documentation
+
+- [README](README.md) — product overview, quick start, API, deployment.
+- [docs/overview.md](docs/overview.md) — problem, philosophy, personas, journeys.
+- [docs/architecture.md](docs/architecture.md) — system, components, data flow.
+- [docs/payment-lifecycle.md](docs/payment-lifecycle.md) — every escrow stage.
+- [docs/database.md](docs/database.md) — schema, migrations, isolation, retention.
+- [docs/security.md](docs/security.md) — controls, threat model, verification.
+- [docs/ai-system.md](docs/ai-system.md) — the three AI roles and their boundaries.
+- [docs/api/README.md](docs/api/README.md) — the full HTTP API reference.
+- [docs/deployment.md](docs/deployment.md) — Vercel, Postgres, environment.
+- [docs/development.md](docs/development.md) — reproducible local setup.
+- [docs/faq.md](docs/faq.md) — grounded answers to common questions.
+- [docs/glossary.md](docs/glossary.md) — terminology.
+- [docs/implementation-status.md](docs/implementation-status.md) — implemented vs planned.
+
+## API and security documentation
+
+- API reference: [docs/api/README.md](docs/api/README.md)
+- Security model and threat model: [docs/security.md](docs/security.md)
+- Authentication details: [docs/AUTH.md](docs/AUTH.md)
+- Architecture decisions: [docs/architecture-decisions/](docs/architecture-decisions/README.md)
+
+## Installation
+
+```bash
+git clone https://github.com/itzebe/pact
+cd pact/backend
+uv venv --python 3.11 .venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+cp ../.env.example ../.env
+export PACT_AUTH_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+uvicorn pact.main:app --reload --port 8000
+```
+
+See [docs/development.md](docs/development.md) for the frontend and the test suites.
+
+## Frequently asked questions (short)
+
+- **Does PACT hold money?** No. PayPal holds it; PACT coordinates the escrow.
+- **Is it real money?** No. The demo runs on the PayPal **Sandbox** host.
+- **Can the AI authorize a payment?** No. The model proposes prices and verdicts; the
+  settlement engine decides and the PayPal client moves the funds.
+- **What if a webhook is repeated?** It is applied at most once (event id claimed in
+  a shared store); a duplicate is acknowledged and ignored.
+- **What if PayPal times out?** The job is marked `unresolved` and must be
+  reconciled by reading PayPal; it is never retried blindly.
+
+Full answers: [docs/faq.md](docs/faq.md).
+
+## Machine-readable metadata
+
+- [metadata/project.json](metadata/project.json) — identity, stack, status.
+- [metadata/features.json](metadata/features.json) — feature inventory with evidence.
+- [metadata/api.json](metadata/api.json) — endpoint inventory.
+- [metadata/security-controls.json](metadata/security-controls.json) — controls.
+- [metadata/evidence.json](metadata/evidence.json) — test and deployment evidence.

@@ -1,4 +1,4 @@
-# Pact
+# PACT
 
 **Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/judge-demo/pact-demo-final-narrated.mp4`](docs/judge-demo/pact-demo-final-narrated.mp4) (2:17, narrated, PayPal Sandbox, shows the guest flow through refund)
 
@@ -19,7 +19,20 @@ workspace is provisioned automatically, with no account to create.
 
 **Settlement infrastructure for the agent economy, built on PayPal escrow.**
 
-AI agents can already negotiate and produce work. What they cannot do is *safely pay each other*, because there is no neutral party holding the money until the work is proven. Pact is that layer: agents negotiate a price, PayPal holds the buyer's funds in escrow, an independent verifier checks the delivery, and only then does the money move.
+> **Documentation map.** This README is the public introduction. The canonical
+> technical documentation is in [`docs/`](docs/README.md), navigable from
+> [`docs/knowledge-map.md`](docs/knowledge-map.md). Machine-readable project metadata
+> is in [`metadata/`](metadata/project.json). For AI systems, start at
+> [`llms.txt`](llms.txt) (compact) or [`llms-full.txt`](llms-full.txt)
+> (consolidated). Agents editing this repository must read [`AGENTS.md`](AGENTS.md).
+>
+> - [Overview](docs/overview.md) · [Architecture](docs/architecture.md) · [Payment lifecycle](docs/payment-lifecycle.md)
+> - [Database](docs/database.md) · [Security](docs/security.md) · [AI system](docs/ai-system.md)
+> - [API reference](docs/api/README.md) · [Deployment](docs/deployment.md) · [Development](docs/development.md)
+> - [FAQ](docs/faq.md) · [Glossary](docs/glossary.md) · [Implementation status](docs/implementation-status.md)
+> - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md)
+
+AI agents can already negotiate and produce work. What they cannot do is *safely pay each other*, because there is no neutral party holding the money until the work is proven. PACT is that layer: agents negotiate a price, PayPal holds the buyer's funds in escrow, an independent verifier checks the delivery, and only then does the money move.
 
 If verification fails, the hold is voided and the buyer is charged nothing.
 
@@ -34,9 +47,9 @@ brief ─▶ negotiate ─▶ agree ─▶ HOLD (PayPal authorize) ─▶ delive
 
 Every serious "trust layer for agents" effort today — Circle, BNB Chain, ERC-8004, x402 — settles in crypto. That excludes the overwhelming majority of real commerce, which runs on fiat rails. Meanwhile the blocker to autonomous purchasing is not capability, it is that nobody will hand an agent a card and hope for the best.
 
-PayPal already provides the exact primitive this needs. Orders v2 supports `intent=AUTHORIZE`, which **reserves** funds rather than taking them, and then offers a genuine two-way branch: `capture` to release, or `void` to return. That is escrow, and it works in the sandbox. Pact builds the missing protocol on top of it.
+PayPal already provides the exact primitive this needs. Orders v2 supports `intent=AUTHORIZE`, which **reserves** funds rather than taking them, and then offers a genuine two-way branch: `capture` to release, or `void` to return. That is escrow, and it works in the sandbox. PACT builds the missing protocol on top of it.
 
-One detail that shapes the whole design: PayPal will not authorize an order until the buyer approves it (or a `payment_source` is supplied inline). Pact does not skip that step — it surfaces the order's `rel:payer-action` link, stops before any work is produced, and only continues once the buyer has approved. Funds are never claimed to be held on the strength of a created order.
+One detail that shapes the whole design: PayPal will not authorize an order until the buyer approves it (or a `payment_source` is supplied inline). PACT does not skip that step — it surfaces the order's `rel:payer-action` link, stops before any work is produced, and only continues once the buyer has approved. Funds are never claimed to be held on the strength of a created order.
 
 ---
 
@@ -45,7 +58,7 @@ One detail that shapes the whole design: PayPal will not authorize an order unti
 A buyer posts a job with a brief, a set of acceptance criteria, and a hard budget ceiling. Then:
 
 1. **Seller agents compete.** Each quotes, the buyer counters, and the price converges over rounds. The budget is enforced in code, not requested of the model — an out-of-budget agreement is rejected by the engine regardless of what the LLM returns.
-2. **Funds are held before work starts.** Pact creates a PayPal order with `intent=AUTHORIZE`, the buyer approves it, and Pact authorizes it. The seller now has committed funds to deliver against; the buyer has parted with nothing. Nothing is delivered until the hold is confirmed by PayPal.
+2. **Funds are held before work starts.** PACT creates a PayPal order with `intent=AUTHORIZE`, the buyer approves it, and PACT authorizes it. The seller now has committed funds to deliver against; the buyer has parted with nothing. Nothing is delivered until the hold is confirmed by PayPal.
 3. **The seller produces the deliverable** it was contracted for.
 4. **An independent verifier checks it** against each acceptance criterion, with per-criterion evidence recorded. Deterministic checks (artifact present, no evasion markers) are combined with model judgement. A pass requires both.
 5. **Settlement releases or returns.** Pass → `capture`, and the seller's reputation improves. Fail → `void`, the buyer is charged nothing, and the seller's reputation drops.
@@ -61,7 +74,7 @@ These are the guarantees that protect real money, and each is covered by a test:
 - **Captured at most once.** Settlement is serialised behind a lock and claims the authorization before the call, so concurrent requests cannot produce a duplicate capture. A second attempt is refused.
 - **An unknown outcome is not a failure.** A timeout, a dropped connection, or a 5xx leaves the job `unresolved` and asks a human to reconcile. It is never retried automatically, because a blind retry is how double-charges happen.
 - **Reconciliation asks PayPal, it does not guess.** `POST /api/jobs/{id}/reconcile` reads the authorization (and the order, if the authorize itself was lost) to establish what actually happened. `CAPTURED` settles the job using the real capture id recovered from PayPal and credits the seller (reversing the failure recorded while the outcome was unknown); an intact hold clears the in-flight marker so the job is retryable; an unreachable PayPal leaves the job `unresolved` and blocked, because an outage is not evidence that no money moved.
-- **A void is confirmed.** After voiding, Pact re-reads the authorization and records whether PayPal confirmed it.
+- **A void is confirmed.** After voiding, PACT re-reads the authorization and records whether PayPal confirmed it.
 - **No capture without a passing verdict.** A failed or inconclusive verification never reaches the capture call.
 
 ---
@@ -120,7 +133,7 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 437 passed, 76 skipped (the Postgres tests skip themselves). The skip count
+# 465 passed, 90 skipped (the Postgres tests skip themselves). The skip count
 # varies with whether the optional psycopg driver is installed.
 python -m pytest tests/ -q
 ```
@@ -134,7 +147,9 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 513 passed — nothing skipped.
+# 550 passed, 5 skipped. The 5 remaining skips need a separate transaction-mode
+# pooler endpoint (PGBOUNCER_URL) to prove the settlement lock is not routed
+# through it; the CI job provides one.
 createdb pact                                          # or a Neon/Supabase/RDS URL
 export DATABASE_URL=postgresql://localhost/pact
 python -m pytest tests/ -q
@@ -157,13 +172,13 @@ starts a real PostgreSQL 16 service and fails if the Postgres tests skip, so the
 cross-instance guarantees cannot silently go unexercised. See
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-332 tests covering the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, shared single-use SSE-ticket consumption (with a four-process cross-instance race and a negative control), the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real.
+The suite covers the escrow state machine, the payment-status invariants (holdable authorization, `COMPLETED`-only settlement, single capture, confirmed void), the buyer-approval flow, transport-failure classification, strict parsing of model-supplied verdicts (fail-closed against string booleans and self-contradicting passes), the budget guardrail, reputation feedback (including a concurrent lost-update guard with a negative control), reconciliation of ambiguous outcomes, shared single-use SSE-ticket consumption (with a four-process cross-instance race and a negative control), the API contract, and hash-chain tamper detection. The real PayPal client is tested through its HTTP layer with only the network boundary stubbed, so request construction, response parsing, and error classification are exercised for real. The current counts are recorded in [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ---
 
 ## Running without credentials
 
-Pact is designed so a reviewer can clone it and see the complete lifecycle with **zero setup**.
+PACT is designed so a reviewer can clone it and see the complete lifecycle with **zero setup**.
 
 | Missing | Behaviour |
 |---|---|
@@ -191,7 +206,7 @@ PAYPAL_ENVIRONMENT=sandbox
 
 4. Restart the backend. The UI badge switches from **Simulated PayPal** to **PayPal Sandbox**, and every settlement creates real objects on `api-m.sandbox.paypal.com`.
 
-5. Run a job. Because PayPal requires the buyer to approve an order before it can be authorized, the run stops at **Buyer approval required** and shows the order's approval link. Open it, approve with a sandbox buyer account, then click **I approved — continue**. Pact authorizes the order, produces and verifies the delivery, and settles.
+5. Run a job. Because PayPal requires the buyer to approve an order before it can be authorized, the run stops at **Buyer approval required** and shows the order's approval link. Open it, approve with a sandbox buyer account, then click **I approved — continue**. PACT authorizes the order, produces and verifies the delivery, and settles.
 
 In simulated mode there is no buyer to click, so the double auto-approves and the whole lifecycle runs in one request. That is the only difference between the two paths — the state machine, the guards, and the ledger are the same code.
 
@@ -199,7 +214,7 @@ You can verify the money movement in the sandbox merchant account's Activity pag
 
 ### The AI layer
 
-Pact speaks to any OpenAI-compatible endpoint, so the model is a deployment choice rather than a hard-coded vendor:
+PACT speaks to any OpenAI-compatible endpoint, so the model is a deployment choice rather than a hard-coded vendor:
 
 ```bash
 LLM_API_KEY=sk-...
@@ -228,7 +243,7 @@ backend/pact/
 
 ### Why the escrow client is hand-written
 
-PayPal publishes an official **Agent Toolkit**, and Pact could have used it. It cannot express this product. The toolkit hard-codes `"intent": "CAPTURE"` in its order payload builder (`python/paypal_agent_toolkit/shared/orders/payload_util.py`), so it only does immediate payment — there is no authorize call, no void, and therefore no way to make settlement conditional on an outcome. Escrow required building directly on the REST API.
+PayPal publishes an official **Agent Toolkit**, and PACT could have used it. It cannot express this product. The toolkit hard-codes `"intent": "CAPTURE"` in its order payload builder (`python/paypal_agent_toolkit/shared/orders/payload_util.py`), so it only does immediate payment — there is no authorize call, no void, and therefore no way to make settlement conditional on an outcome. Escrow required building directly on the REST API.
 
 Every call is idempotent via `PayPal-Request-Id`, so a retried request cannot double-charge.
 
@@ -291,7 +306,7 @@ Interactive docs at `http://localhost:8000/docs`.
 
 ## Authentication
 
-Pact holds and moves money, so it does not serve an anonymous caller. A request
+PACT holds and moves money, so it does not serve an anonymous caller. A request
 carries a signed bearer token; the caller's identity — buyer, seller, or admin —
 is *derived* from the verified signature, never trusted from the request body. A
 buyer can only read and drive their own jobs; reconciliation, deletion, and the
@@ -396,7 +411,7 @@ instances may serve the same job. Two things follow, and both are handled:
   instances cannot both capture the same authorization. The lock is a *session*
   lock, so it must not run through a transaction-mode pooler (Neon's `-pooler`
   host, PgBouncer), which hands the server connection back after every
-  transaction and releases the lock between statements. Pact therefore holds it on
+  transaction and releases the lock between statements. PACT therefore holds it on
   a direct connection: `DATABASE_URL_UNPOOLED` when set, or — when `DATABASE_URL`
   is a Neon-style `-pooler` host — the direct host derived from it (the pooled host
   with `-pooler` removed, which is the edit Neon documents). `pool.direct()`
