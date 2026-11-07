@@ -102,6 +102,7 @@ list.
 | `PACT_MAX_CONCURRENT_RUNS` | Concurrent-run ceiling per instance |
 | `PACT_RUN_TIMEOUT_SECONDS` / `PACT_LEASE_SECONDS` | Run deadline and execution lease |
 | `PACT_PG_POOL_MAX_SIZE` | Per-instance pool size |
+| `PACT_PG_PREPARE_THRESHOLD` | psycopg3 statement-preparation threshold; `none` (default) disables it, required behind a transaction-mode pooler |
 
 **Never set `PAYPAL_ENVIRONMENT=live`.** Startup refuses guest sessions against a live
 host, and `PACT_PAYPAL_SANDBOX_ONLY` refuses a live host outright.

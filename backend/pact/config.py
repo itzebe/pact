@@ -19,6 +19,20 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _optional_int(name: str) -> int | None:
+    """An int from the environment, or ``None`` when unset/blank/``none``.
+
+    ``None`` is a meaningful value here (it disables psycopg3's automatic statement
+    preparation), so an unset variable must not collapse to ``0`` — with psycopg3
+    ``prepare_threshold=0`` means "prepare on the first execution", the opposite of
+    what is wanted.
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "" or raw.strip().lower() == "none":
+        return None
+    return int(raw)
+
+
 # PayPal's two API hosts. The sandbox host is the only one this project should ever
 # talk to during sandbox work; the live host moves real money.
 PAYPAL_SANDBOX_HOST = "api-m.sandbox.paypal.com"
@@ -296,6 +310,18 @@ class Settings:
     )
     pg_statement_timeout_ms: int = field(
         default_factory=lambda: int(os.getenv("PACT_PG_STATEMENT_TIMEOUT_MS", "10000"))
+    )
+    # psycopg3 prepares a statement server-side after this many executions. Behind
+    # a transaction-mode pooler that is unsafe: the pooler hands a *server*
+    # connection to a different client between transactions, and the next client's
+    # fresh session re-issues ``PREPARE _pg3_0`` on a server connection that already
+    # has it, raising ``DuplicatePreparedStatement`` and failing the request.
+    # ``None`` (the default, via ``PACT_PG_PREPARE_THRESHOLD=none``) disables
+    # automatic preparation, which is the documented safe setting for pgbouncer in
+    # transaction mode. A positive integer re-enables it (psycopg's own default is
+    # 5); only do that for an endpoint you know is a direct session, never a pooler.
+    pg_prepare_threshold: int | None = field(
+        default_factory=lambda: _optional_int("PACT_PG_PREPARE_THRESHOLD")
     )
 
     @property

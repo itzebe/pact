@@ -65,6 +65,7 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 | Pluggable verifiers (e.g. running tests against a code deliverable) | Planned |
 | Additional settlement rails behind the same escrow interface | Planned |
 | An independent security audit / certification | Not done |
+| Wiring the pool-tuning env vars into `get_pool` | Known gap: `pact/config.py` defines `PACT_PG_POOL_MAX_SIZE`, `PACT_PG_POOL_MIN_SIZE`, `PACT_PG_POOL_TIMEOUT_SECONDS`, `PACT_PG_POOL_MAX_IDLE_SECONDS` and `PACT_PG_STATEMENT_TIMEOUT_MS`, but the stores call `get_pool(dsn)` without passing them, so the pool uses the identical hard-coded defaults in `core/pool.py` and setting the env vars has no effect. `PACT_PG_PREPARE_THRESHOLD` **is** wired. Documented as a defect, not fixed here, because changing runtime pool behaviour is outside this repository's documentation scope. |
 | A ledger grid with no accessibility violations | Known limitation: AG Grid 33 emits `role="presentation"` viewports that carry `tabindex="-1"`, which axe flags as `aria-required-children` (critical). It is library-internal, has no public option to remove it, and is present on the unmodified production build. The grid keeps working sort/resize, which a replacement would drop. |
 
 ## Verification summary (this repository)
@@ -72,11 +73,12 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **465 passed, 90 skipped**.
-- Backend (PostgreSQL 17): **550 passed, 5 skipped** (the 5 need a separate
-  PgBouncer endpoint).
+- Backend (filesystem store): **465 passed, 94 skipped**.
+- Backend (PostgreSQL 17): **553 passed, 6 skipped** (the 6 need a separate
+  PgBouncer endpoint). With PgBouncer in transaction mode: **558 passed, 1 skipped**.
 - Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
+- Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.
 - Production `/api/health`: `status: ok`, `paypal.mode: sandbox`, `llm.is_mock:
   false`, `storage: {backend: postgres, durable: true}` *(live)*.
 

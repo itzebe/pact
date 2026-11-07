@@ -448,3 +448,28 @@ def test_the_pooled_endpoint_cannot_hold_a_session_lock():
             cur.execute("SELECT pg_advisory_unlock(%s)", (key,))
     finally:
         first.close()
+
+
+@pytest.mark.skipif(not POOLED_URL, reason="PGBOUNCER_URL not set; need a transaction-mode pooler")
+def test_the_pooled_endpoint_never_prepares_statements_server_side():
+    """Regression: the pooled path must not create server-side prepared statements.
+
+    psycopg3 prepares a statement after 5 executions and names it ``_pg3_0``. A
+    transaction-mode pooler hands the same *server* connection to the next client,
+    whose fresh session re-issues ``PREPARE _pg3_0`` and raises
+    ``DuplicatePreparedStatement`` — the intermittent CI failure this guards
+    against. The pool disables preparation for every pooled connection, so no
+    ``_pg3_`` statement is created no matter how many times a query runs.
+    """
+    from pact.core.pool import DatabasePool
+
+    pool = DatabasePool(POOLED_URL, max_size=1)
+    try:
+        with pool.connection() as conn, conn.cursor() as cur:
+            for i in range(12):  # well past the driver default threshold of 5
+                cur.execute("SELECT %s::int", (i,))
+                cur.fetchall()
+            cur.execute("SELECT count(*) FROM pg_prepared_statements WHERE name ~ '^_pg3_'")
+            assert cur.fetchone()[0] == 0, "the pooled endpoint prepared a statement"
+    finally:
+        pool.close()

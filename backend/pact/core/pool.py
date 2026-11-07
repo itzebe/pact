@@ -37,6 +37,20 @@ handed to a different client. ``connection()`` therefore sets it with
 ``SET LOCAL`` inside one transaction per checkout, where it is enforced for every
 statement of that unit of work. ``direct()`` has a genuine session, so a
 session-level ``SET`` is correct there.
+
+Prepared statements are disabled on pooled connections
+------------------------------------------------------
+psycopg3 prepares a statement server-side after a few executions and names it
+``_pg3_0``, ``_pg3_1``, …. Behind a transaction-mode pooler that name outlives
+the client that created it: the pooler hands the same server connection to the
+next client, whose fresh session believes nothing is prepared and re-issues
+``PREPARE _pg3_0``, raising ``DuplicatePreparedStatement`` and failing the
+request. Every pooled connection is therefore opened with
+``prepare_threshold=None`` (automatic preparation off), which is the documented
+setting for pgbouncer in transaction mode. The cost is re-planning each
+statement, which is the correct trade for correctness. ``direct()`` opens a
+genuine session and could prepare safely, but keeps the same setting so the
+behaviour is uniform and no path depends on the endpoint's nature.
 """
 
 from __future__ import annotations
@@ -60,6 +74,12 @@ DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_MAX_IDLE_SECONDS = 300.0
 #: A statement that runs longer than this is aborted by the server.
 DEFAULT_STATEMENT_TIMEOUT_MS = 10_000
+#: Automatic server-side statement preparation is disabled by default for pooled
+#: connections: psycopg3's ``prepare_threshold=None`` means "never prepare". A
+#: transaction-mode pooler shares one server connection across clients, so a
+#: prepared statement left by one client collides with the next client's
+#: identically named one (``_pg3_0``) and raises ``DuplicatePreparedStatement``.
+DEFAULT_PREPARE_THRESHOLD: int | None = None
 
 
 def _driver_pool():
@@ -242,6 +262,7 @@ class DatabasePool:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         max_idle_seconds: float = DEFAULT_MAX_IDLE_SECONDS,
         statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+        prepare_threshold: int | None = DEFAULT_PREPARE_THRESHOLD,
     ) -> None:
         ConnectionPool = _driver_pool()
         self.dsn = dsn
@@ -253,6 +274,12 @@ class DatabasePool:
         self.direct_dsn = (direct_dsn or _default_direct_dsn(dsn)).strip() or dsn
         self.max_size = max(1, int(max_size))
         self.statement_timeout_ms = max(0, int(statement_timeout_ms))
+        # ``None`` disables automatic preparation (the safe setting behind a pooler);
+        # a positive int re-enables it. Negative values are meaningless, so clamp to
+        # None rather than passing a value psycopg3 would reject.
+        self.prepare_threshold = (
+            None if prepare_threshold is None or prepare_threshold < 0 else int(prepare_threshold)
+        )
 
         # Synchronous probe *before* any pool machinery. This raises the precise
         # driver error — an invalid connection string, bad credentials, or an
@@ -262,7 +289,9 @@ class DatabasePool:
         # closed immediately and is not part of the pool's budget.
         import psycopg
 
-        probe = psycopg.connect(dsn, connect_timeout=5)
+        probe = psycopg.connect(
+            dsn, connect_timeout=5, prepare_threshold=self.prepare_threshold
+        )
         probe.close()
 
         self._pool = ConnectionPool(
@@ -276,7 +305,12 @@ class DatabasePool:
             # Connections are created in autocommit mode; ``connection()`` switches
             # them to a transaction per checkout so ``SET LOCAL`` applies and a
             # multi-statement operation is not split across backends.
-            kwargs={"autocommit": True},
+            # ``prepare_threshold`` is set on every pooled connection: behind a
+            # transaction-mode pooler a server-side prepared statement outlives the
+            # client that created it, so the next client's identically named
+            # ``_pg3_0`` collides (``DuplicatePreparedStatement``). ``None`` disables
+            # preparation, which is the documented pgbouncer-transaction-mode setting.
+            kwargs={"autocommit": True, "prepare_threshold": self.prepare_threshold},
             # No statement_timeout here. A session-level SET on a pooled connection is
             # unreliable behind a transaction-mode pooler — it can be reset, or handed
             # to another client — so the timeout is applied transaction-locally in
@@ -358,7 +392,9 @@ class DatabasePool:
             raise RuntimeError(
                 "Refusing to hold a session-scoped settlement lock: " + reason
             )
-        conn = psycopg.connect(dsn, autocommit=autocommit)
+        conn = psycopg.connect(
+            dsn, autocommit=autocommit, prepare_threshold=self.prepare_threshold
+        )
         try:
             if self.statement_timeout_ms > 0:
                 # A genuine session, so a session-level SET is reliable here.
@@ -409,6 +445,12 @@ def get_pool(dsn: str, *, direct_dsn: str | None = None, **kwargs: Any) -> Datab
     with _pools_guard:
         pool = _pools.get(dsn)
         if pool is None:
+            if "prepare_threshold" not in kwargs:
+                # Default to the deployment setting (disabled by default). A caller
+                # that knows it has a direct session may pass an explicit value.
+                from ..config import settings
+
+                kwargs["prepare_threshold"] = settings.pg_prepare_threshold
             pool = DatabasePool(dsn, direct_dsn=direct_dsn, **kwargs)
             _pools[dsn] = pool
         return pool
