@@ -49,7 +49,7 @@ check, it is marked *(live)*.
 | Request body cap | `main.py` | Implemented and verified | `tests/test_security.py` |
 | Bounded run concurrency | `core/engine.py`, `api/routes.py` | Implemented and verified | `tests/test_security.py` |
 | Reputation + market selection | `core/store.py`, `core/dbstore.py`, `core/negotiation.py` | Implemented and verified | `tests/test_reconciliation_reputation.py` |
-| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (40 tests); production app returns 200 |
+| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (43 tests); production app returns 200; axe-core reports 0 violations and 0 sub-24px targets at 390/768/1440px (empty, negotiation, verification states) |
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
 | Customer accounts + email outbox | `core/accounts.py`, `core/auth_store.py`, `core/email.py` | Implemented but partially verified | `tests/test_accounts.py`, `tests/test_auth_routes.py`, `tests/test_email_dispatcher.py`; the end-to-end email path needs a provider and is not exercised live |
 | Pooled-endpoint settlement routing | `core/pool.py`, `core/dbstore.py` | Implemented but partially verified | `tests/test_settlement_pooling.py` runs only when `PGBOUNCER_URL` is set (CI provides it; a bare local run skips 5 tests) |
@@ -65,6 +65,7 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 | Pluggable verifiers (e.g. running tests against a code deliverable) | Planned |
 | Additional settlement rails behind the same escrow interface | Planned |
 | An independent security audit / certification | Not done |
+| A ledger grid with no accessibility violations | Known limitation: AG Grid 33 emits `role="presentation"` viewports that carry `tabindex="-1"`, which axe flags as `aria-required-children` (critical). It is library-internal, has no public option to remove it, and is present on the unmodified production build. The grid keeps working sort/resize, which a replacement would drop. |
 
 ## Verification summary (this repository)
 
@@ -74,7 +75,7 @@ Recorded in [`evidence/README.md`](evidence/README.md) and
 - Backend (filesystem store): **465 passed, 90 skipped**.
 - Backend (PostgreSQL 17): **550 passed, 5 skipped** (the 5 need a separate
   PgBouncer endpoint).
-- Frontend: **40 passed**; production build succeeds.
+- Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Production `/api/health`: `status: ok`, `paypal.mode: sandbox`, `llm.is_mock:
   false`, `storage: {backend: postgres, durable: true}` *(live)*.
