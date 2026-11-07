@@ -101,7 +101,11 @@ list.
 | `PACT_PAYPAL_SANDBOX_ONLY` | `true` hard-refuses a live PayPal host in every environment |
 | `PACT_MAX_CONCURRENT_RUNS` | Concurrent-run ceiling per instance |
 | `PACT_RUN_TIMEOUT_SECONDS` / `PACT_LEASE_SECONDS` | Run deadline and execution lease |
-| `PACT_PG_POOL_MAX_SIZE` | Per-instance pool size |
+| `PACT_PG_POOL_MAX_SIZE` | Per-instance pool size (default 5) |
+| `PACT_PG_POOL_MIN_SIZE` | Connections kept open per instance (default 0) |
+| `PACT_PG_POOL_TIMEOUT_SECONDS` | Seconds a caller waits for a pooled connection (default 5.0) |
+| `PACT_PG_POOL_MAX_IDLE_SECONDS` | Recycle a connection idle longer than this (default 300) |
+| `PACT_PG_STATEMENT_TIMEOUT_MS` | Server-side statement timeout; 0 leaves the server default (default 10000) |
 | `PACT_PG_PREPARE_THRESHOLD` | psycopg3 statement-preparation threshold; `none` (default) disables it, required behind a transaction-mode pooler |
 
 **Never set `PAYPAL_ENVIRONMENT=live`.** Startup refuses guest sessions against a live

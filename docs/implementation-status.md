@@ -53,6 +53,7 @@ check, it is marked *(live)*.
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
 | Customer accounts + email outbox | `core/accounts.py`, `core/auth_store.py`, `core/email.py` | Implemented but partially verified | `tests/test_accounts.py`, `tests/test_auth_routes.py`, `tests/test_email_dispatcher.py`; the end-to-end email path needs a provider and is not exercised live |
 | Pooled-endpoint settlement routing | `core/pool.py`, `core/dbstore.py` | Implemented but partially verified | `tests/test_settlement_pooling.py` runs only when `PGBOUNCER_URL` is set (CI provides it; a bare local run skips 5 tests) |
+| Configurable pool limits | `pact/config.py`, `core/pool.py` (`get_pool`) | Implemented and verified | `tests/test_pool_config.py`: `get_pool` forwards `PACT_PG_POOL_MAX_SIZE`/`MIN_SIZE`/`TIMEOUT_SECONDS`/`MAX_IDLE_SECONDS`/`PACT_PG_STATEMENT_TIMEOUT_MS` to the pool, an explicit kwarg overrides a setting, and `validate_runtime` rejects a value the driver would refuse (previously these settings were defined but never passed) |
 
 ## Not implemented (planned / out of scope)
 
@@ -65,7 +66,6 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 | Pluggable verifiers (e.g. running tests against a code deliverable) | Planned |
 | Additional settlement rails behind the same escrow interface | Planned |
 | An independent security audit / certification | Not done |
-| Wiring the pool-tuning env vars into `get_pool` | Known gap: `pact/config.py` defines `PACT_PG_POOL_MAX_SIZE`, `PACT_PG_POOL_MIN_SIZE`, `PACT_PG_POOL_TIMEOUT_SECONDS`, `PACT_PG_POOL_MAX_IDLE_SECONDS` and `PACT_PG_STATEMENT_TIMEOUT_MS`, but the stores call `get_pool(dsn)` without passing them, so the pool uses the identical hard-coded defaults in `core/pool.py` and setting the env vars has no effect. `PACT_PG_PREPARE_THRESHOLD` **is** wired. Documented as a defect, not fixed here, because changing runtime pool behaviour is outside this repository's documentation scope. |
 | A ledger grid with no accessibility violations | Known limitation: AG Grid 33 emits `role="presentation"` viewports that carry `tabindex="-1"`, which axe flags as `aria-required-children` (critical). It is library-internal, has no public option to remove it, and is present on the unmodified production build. The grid keeps working sort/resize, which a replacement would drop. |
 
 ## Verification summary (this repository)
@@ -73,9 +73,9 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **465 passed, 94 skipped**.
-- Backend (PostgreSQL 17): **553 passed, 6 skipped** (the 6 need a separate
-  PgBouncer endpoint). With PgBouncer in transaction mode: **558 passed, 1 skipped**.
+- Backend (filesystem store): **480 passed, 94 skipped**.
+- Backend (PostgreSQL 17): **568 passed, 6 skipped** (the 6 need a separate
+  PgBouncer endpoint). With PgBouncer in transaction mode: **573 passed, 1 skipped**.
 - Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.

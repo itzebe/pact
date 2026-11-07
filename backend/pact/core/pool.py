@@ -441,16 +441,32 @@ def get_pool(dsn: str, *, direct_dsn: str | None = None, **kwargs: Any) -> Datab
     read once, when the pool is created, and the pool is keyed by ``dsn`` alone:
     the direct endpoint is process-wide configuration, so a second store asking for
     the same DSN must reuse the pool rather than open a duplicate one.
+
+    The operator's pool limits (``PACT_PG_POOL_*``, ``PACT_PG_STATEMENT_TIMEOUT_MS``)
+    and the prepared-statement policy are read from :mod:`pact.config` here. A caller
+    may override any of them with an explicit keyword — that wins over the setting.
     """
     with _pools_guard:
         pool = _pools.get(dsn)
         if pool is None:
+            from ..config import settings
+
             if "prepare_threshold" not in kwargs:
                 # Default to the deployment setting (disabled by default). A caller
                 # that knows it has a direct session may pass an explicit value.
-                from ..config import settings
-
                 kwargs["prepare_threshold"] = settings.pg_prepare_threshold
+            # The operator's pool limits. Their defaults mirror this module's own,
+            # so an unset environment changes nothing; a set one takes effect.
+            # Without this the settings were read but never passed, so every
+            # PACT_PG_POOL_* value was silently ignored.
+            for name, value in (
+                ("min_size", settings.pg_pool_min_size),
+                ("max_size", settings.pg_pool_max_size),
+                ("timeout_seconds", settings.pg_pool_timeout_seconds),
+                ("max_idle_seconds", settings.pg_pool_max_idle_seconds),
+                ("statement_timeout_ms", settings.pg_statement_timeout_ms),
+            ):
+                kwargs.setdefault(name, value)
             pool = DatabasePool(dsn, direct_dsn=direct_dsn, **kwargs)
             _pools[dsn] = pool
         return pool
