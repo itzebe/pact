@@ -302,7 +302,7 @@
       ],
       "status": "implemented_verified",
       "evidence": [
-        "frontend/test/*.js (52 tests)",
+        "frontend/test/*.js (58 tests)",
         "live: production root returns 200"
       ]
     },
@@ -409,6 +409,27 @@
         "backend/tests/test_deployment_safety.py"
       ],
       "note": "Exceeding a limit is 429 with Retry-After and X-RateLimit-* headers; /api/health reports the scope (memory/postgres/unavailable)."
+    },
+    {
+      "id": "machine_readable_surface",
+      "name": "Machine-readable and LLM-discoverable surface",
+      "description": "The root llms.txt, llms-full.txt and project.json are the canonical machine-readable entry points. The production site serves the same three files verbatim (copied from the repository root at build time, so they cannot drift) plus robots.txt and sitemap.xml, and the landing document carries a schema.org SoftwareApplication JSON-LD block, meta/Open Graph/Twitter tags, and a <noscript> fallback so the initial HTML is meaningful without JavaScript.",
+      "implementation": [
+        "llms.txt",
+        "llms-full.txt",
+        "project.json",
+        "frontend/public/robots.txt",
+        "frontend/public/sitemap.xml",
+        "frontend/index.html",
+        "frontend/vite.config.js",
+        "scripts/check_docs.py"
+      ],
+      "status": "implemented_verified",
+      "evidence": [
+        "frontend/test/machine-files.test.js (robots/sitemap, JSON-LD, no-JS fallback, canonical-file copy)",
+        "scripts/check_docs.py (validates the GitHub-absolute links in llms.txt / llms-full.txt)"
+      ],
+      "note": "This improves discoverability, not indexation: no search engine or LLM is claimed to have indexed PACT. Repository topics and the Devpost copy are owner actions documented in docs/discoverability.md."
     }
   ],
   "not_implemented": [

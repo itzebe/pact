@@ -51,10 +51,11 @@ check, it is marked *(live)*.
 | Bounded run concurrency | `core/engine.py`, `api/routes.py` | Implemented and verified | `tests/test_security.py` |
 | Money-route rate limiting | `core/rate_limit.py`, `api/routes.py` (`_enforce_rate_limit`) | Implemented and verified | `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py`, `tests/test_deployment_safety.py` (shared counter, guest keyed on address, fails closed, production refuses disable) |
 | Reputation + market selection | `core/store.py`, `core/dbstore.py`, `core/negotiation.py` | Implemented and verified | `tests/test_reconciliation_reputation.py` |
-| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (52 tests); production app returns 200; axe-core reports 0 violations on the home and ledger views at 390/768/1440px |
+| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (58 tests); production app returns 200; axe-core reports 0 violations on the home and ledger views at 390/768/1440px |
 | Frontend code-splitting | `frontend/src/components/LedgerPanel.jsx`, `frontend/src/App.jsx` | Implemented and verified (deployed) | `frontend/test/bundle-a11y.test.js`; the initial bundle is ~190 kB (AG Grid is loaded lazily on the Ledger tab, its own ~1.26 MB chunk). Verified live in production at `41958ab` on 2026-11-08 (`/assets/index-zW1Towtn.js`, 190,654 bytes) |
 | Deterministic production build | `frontend/vite.config.js` | Implemented and verified | `frontend/test/bundle-a11y.test.js`; the build pins `NODE_ENV=production`, so an ambient `NODE_ENV=development` can no longer ship React's development bundle (411 kB vs 190 kB). See `docs/architecture-decisions/0010-pin-node-env-for-build.md` |
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
+| Machine-readable / LLM-discoverable surface | `llms.txt`, `llms-full.txt`, `project.json`, `frontend/public/robots.txt`, `frontend/public/sitemap.xml`, `frontend/index.html`, `frontend/vite.config.js` | Implemented and verified | `frontend/test/machine-files.test.js` (robots/sitemap, JSON-LD, `<noscript>` fallback, canonical-file copy); `scripts/check_docs.py` validates the GitHub-absolute links in `llms.txt` / `llms-full.txt`. Discoverability only — no indexation is claimed; see [`discoverability.md`](discoverability.md) |
 | Customer accounts + email outbox | `core/accounts.py`, `core/auth_store.py`, `core/email.py` | Implemented but partially verified | `tests/test_accounts.py`, `tests/test_auth_routes.py`, `tests/test_email_dispatcher.py`; the end-to-end email path needs a provider and is not exercised live |
 | Pooled-endpoint settlement routing | `core/pool.py`, `core/dbstore.py` | Implemented but partially verified | `tests/test_settlement_pooling.py` runs only when `PGBOUNCER_URL` is set (CI provides it; a bare local run skips 5 tests) |
 | Configurable pool limits | `pact/config.py`, `core/pool.py` (`get_pool`) | Implemented and verified | `tests/test_pool_config.py`: `get_pool` forwards `PACT_PG_POOL_MAX_SIZE`/`MIN_SIZE`/`TIMEOUT_SECONDS`/`MAX_IDLE_SECONDS`/`PACT_PG_STATEMENT_TIMEOUT_MS` to the pool, an explicit kwarg overrides a setting, and `validate_runtime` rejects a value the driver would refuse (previously these settings were defined but never passed) |
@@ -84,7 +85,7 @@ Recorded in [`evidence/README.md`](evidence/README.md) and
 - Backend (filesystem store): **516 passed, 103 skipped**.
 - Backend (PostgreSQL 17): **613 passed, 6 skipped**.
 - Backend (PostgreSQL + transaction-mode pooler): **619 passed, 0 skipped**.
-- Frontend: **52 passed**; production build succeeds.
+- Frontend: **58 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.
 - Production `/api/health`: `status: ok`, `paypal.environment: sandbox`,

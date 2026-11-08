@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": "1.0.0",
+  "note": "Concise, machine-readable project facts for PACT, intended for AI evaluators and automated indexing. This is the compact summary; the detailed, source-referenced index is metadata/project.json. If the two disagree, the source code and the canonical prose in README.md and docs/ win, and this file is the bug.",
+  "name": "PACT",
+  "one_line": "Conditional settlement infrastructure for the agent economy: PayPal holds the buyer's funds and they are released only when an independent verifier confirms the delivery meets the buyer's acceptance criteria.",
+  "description": "PACT is a guest-first work coordination and settlement layer for work performed between autonomous agents. A buyer posts a job with a brief, acceptance criteria and a budget ceiling; seller agents negotiate a price; PayPal holds the buyer's funds (Orders v2, intent=AUTHORIZE) before any work starts; the selected seller produces a deliverable; an independent verifier checks it against every acceptance criterion; and the money is captured on a pass or voided on a fail. Every state transition is appended to a SHA-256 hash-chained, tamper-evident ledger. The deployed demo runs on the PayPal Sandbox host and moves no real money.",
+  "category": "agent-payments",
+  "subcategory": "escrow-conditional-settlement",
+  "problem": "Two agents that do not trust each other cannot safely transact. If the buyer pays first the seller can take the money and not deliver; if the seller delivers first the buyer can refuse to pay. Existing agent trust layers mostly settle in crypto, which excludes ordinary fiat commerce.",
+  "solution": "Build the coordination protocol on top of a payment primitive that already exists: a PayPal authorization reserves the buyer's funds, and a two-way branch releases them with capture (pass) or returns them with void (fail). An independent verifier, not the buyer alone, decides the branch, and the verdict plus every transition is recorded in a hash-chained ledger.",
+  "target_users": [
+    "Autonomous buyer and seller agents transacting small, well-specified work",
+    "Developers building agent marketplaces that need a fiat settlement primitive",
+    "Researchers and evaluators who need a runnable, auditable reference implementation of escrow settlement"
+  ],
+  "intended_impact": "Give autonomous agents a neutral, verifiable way to pay for work on ordinary fiat rails, so agent-to-agent commerce does not require either party to trust the other or to use crypto.",
+  "differentiator": "Payment is conditional on an independent verification verdict, not on a timer or on the buyer's unchecked approval. The buyer's funds are held before work starts and are released only when the delivery passes the acceptance criteria; on a fail the hold is voided and the buyer is charged nothing. Reputation from settled outcomes feeds back into seller selection, so unreliable sellers are routed around.",
+  "architecture": {
+    "style": "Single-page React frontend over a FastAPI JSON API; one Python function on Vercel serves /api/*, the built frontend is served as static output.",
+    "backend": "Python 3.11 + FastAPI + Pydantic v2. Entry point backend/pact/main.py; deployed on Vercel via api/index.py.",
+    "frontend": "React 18 + Vite 6 + Tailwind CSS 3, served as a static single-page app. The AG Grid ledger is lazily loaded.",
+    "persistence": "PostgreSQL (JSONB job documents plus reputation, webhook and ticket tables) via psycopg3/psycopg_pool, with a filesystem fallback for single-instance development.",
+    "payments": "Hand-written PayPal Orders v2 / Payments v2 escrow client (backend/pact/paypal/escrow.py) with an in-memory double (mock.py) that enforces the same state machine.",
+    "concurrency": "A per-job settlement guard; on PostgreSQL a session advisory lock on a direct (unpooled) connection; leases for run and approval claims."
+  },
+  "technologies": {
+    "backend": ["Python 3.11", "FastAPI", "Pydantic v2", "sse-starlette", "httpx", "PyJWT", "argon2-cffi"],
+    "frontend": ["React 18", "Vite 6", "Tailwind CSS 3", "AG Grid Community"],
+    "database": ["PostgreSQL", "psycopg3", "psycopg_pool"],
+    "payments": ["PayPal Orders v2", "PayPal Payments v2"],
+    "ai": ["OpenAI-compatible chat completions"],
+    "hosting": ["Vercel", "Docker", "Render (config present)"],
+    "ci": ["GitHub Actions"]
+  },
+  "ai_integration": {
+    "roles": ["seller agent (quote + deliverable)", "buyer agent (counter-offer)", "verifier (per-criterion verdict)"],
+    "provider": "Any OpenAI-compatible chat-completions endpoint. The deployed demo uses Groq with openai/gpt-oss-20b (reported live at /api/health as llm.model).",
+    "boundaries": "The AI proposes prices and verdicts; it never authorizes, captures, voids or refunds. The settlement engine decides whether money moves and only the PayPal client moves it. A malformed verifier verdict fails closed. Without an API key a deterministic mock policy engine runs so the whole lifecycle works offline.",
+    "deterministic_vs_ai": {
+      "deterministic": ["budget-ceiling enforcement", "seller selection by risk-adjusted cost", "settlement decision and PayPal calls", "deterministic verifier checks (artifact present and non-trivial, no evasion markers, summary present)", "hash-chained ledger"],
+      "ai_assisted": ["seller price quotes", "buyer counter-offers", "the model half of the verifier judgement (combined with deterministic checks by a logical AND)"]
+    }
+  },
+  "paypal_integration": {
+    "environment": "Sandbox only (the deployed demo). A runtime guard hard-refuses a live host.",
+    "api": "Orders v2 with intent=AUTHORIZE; Payments v2 for capture and refund.",
+    "lifecycle": ["create order", "buyer approves in PayPal", "authorize (hold)", "capture (release) on a passing verdict", "void (return) on a failing verdict", "refund a captured payment in full or in part"],
+    "idempotency": "Every mutating call carries a PayPal-Request-Id; duplicate capture and refund are refused.",
+    "webhooks": "PayPal webhook events are signature-verified via PayPal's own verify endpoint and applied at most once (event id claimed in a shared store)."
+  },
+  "workflow": [
+    "Post a job: title, brief, acceptance criteria, and a hard budget ceiling (buyer identity from the authenticated token, not the request body).",
+    "Negotiate: seller agents quote; the buyer counters; the price converges over up to three rounds; the budget ceiling is enforced in code.",
+    "Hold: create a PayPal order with intent=AUTHORIZE; the buyer approves; PACT authorizes and records the hold only on a holdable authorization.",
+    "Deliver: the selected seller agent produces the deliverable.",
+    "Verify: an independent verifier checks the delivery against every acceptance criterion (deterministic checks AND model judgement).",
+    "Settle: pass -> capture (release) and reputation improves; fail -> void (return), the buyer is charged nothing, reputation drops.",
+    "Refund: a captured payment can be refunded in full or in part, capped at the captured amount and idempotent per operation."
+  ],
+  "security_controls": [
+    "Fail-closed authentication: a missing auth secret refuses protected requests (503); production refuses to start.",
+    "Object-level authorization: every job access checks the caller is a party; a non-owner gets 404, not 403.",
+    "Guest sessions: HttpOnly, SameSite=Lax cookies scoped to /api, with a CSRF token required on mutating methods.",
+    "PayPal webhook signature verification with exactly-once event processing.",
+    "Duplicate capture/refund prevention: an in-flight claim, a settlement guard, and per-operation idempotency keys.",
+    "Sandbox-only guard (PACT_PAYPAL_SANDBOX_ONLY) that hard-refuses a live host; startup refuses guest sessions combined with a live host.",
+    "Per-identity rate limiting on every money-bearing route, counted in a shared PostgreSQL store that fails closed when unreachable.",
+    "Bounded request bodies, bounded run concurrency, and redaction of credentials and payer identity from logs and responses."
+  ],
+  "verification_method": {
+    "verifier": "A model plus deterministic checks, combined with a logical AND; a pass requires both. It is not a formal correctness proof of a deliverable.",
+    "ledger": "A per-job SHA-256 hash chain that is tamper-evident and re-verified live in the UI (verify_chain).",
+    "tests": "A backend pytest suite against a real PostgreSQL 17 plus a transaction-mode pooler (the CI configuration), a frontend node:test suite, and a production Docker image that must start and answer its own health check. Exact counts are recorded in metadata/evidence.json against the commit where they were run."
+  },
+  "payment_model": {
+    "custody": "PACT is not a custodian and holds no funds. PayPal holds the buyer's funds; PACT coordinates the conditional release.",
+    "real_money": false,
+    "disclosure": "The deployed demo runs on the PayPal Sandbox host and moves no real money. Live-money mode is refused by a runtime guard. This is a requirement of the demo deployment, not a claim about any commercial product."
+  },
+  "current_status": {
+    "maturity": "working reference implementation",
+    "implemented_and_tested": [
+      "guest-first isolated sessions",
+      "job creation with acceptance criteria and a budget ceiling",
+      "multi-round seller negotiation with an in-code budget guardrail",
+      "PayPal escrow hold (authorize) / release (capture) / return (void)",
+      "independent verification with per-criterion evidence",
+      "partial and full refunds",
+      "PayPal webhook signature verification and exactly-once processing",
+      "hash-chained audit ledger",
+      "durable PostgreSQL persistence",
+      "reputation-aware seller selection"
+    ],
+    "see_also": "docs/implementation-status.md and metadata/features.json for the per-feature status and evidence."
+  },
+  "known_limitations": [
+    "Sandbox only: the demo moves no real money.",
+    "No independent security audit or certification; the controls are implemented and tested but have not been audited by a third party.",
+    "Verification is a model plus deterministic checks, not a formal proof of a deliverable.",
+    "No dispute/arbitration flow and no partial release of a single authorization.",
+    "Customer self-service accounts and transactional email are implemented but disabled by default (they require a verified email sending domain).",
+    "No wallet or fiat payout logic: PACT does not hold funds itself."
+  ],
+  "demo_url": "https://pact-flame.vercel.app/",
+  "demo_video_url": "https://www.youtube.com/watch?v=CMGsmqTr6FQ",
+  "repository_url": "https://github.com/itzebe/pact",
+  "devpost_url": "https://devpost.com/software/pact-verified-payments-for-ai-agents",
+  "license": "MIT",
+  "llm_resources": {
+    "llms_txt": "https://pact-flame.vercel.app/llms.txt",
+    "llms_full_txt": "https://pact-flame.vercel.app/llms-full.txt",
+    "project_json": "https://pact-flame.vercel.app/project.json"
+  },
+  "judging_criteria_evidence": {
+    "technological_implementation": "Real PayPal Orders v2 intent=AUTHORIZE -> approve -> authorize -> capture/void plus refunds, idempotent via PayPal-Request-Id; webhook signature verification; three LLM roles; hash-chained ledger; single-capture under a database lock. See backend/pact/paypal/escrow.py, backend/pact/core/settlement.py, backend/pact/core/webhooks.py, and tests/test_paypal_client.py, tests/test_escrow.py, tests/test_refund.py.",
+    "design": "One continuous product: guest onboarding, job composer, negotiation, payment panel, verification, and a ledger, responsive to 390 px with WCAG-minded contrast and focus. See frontend/src/App.jsx and docs/judge-demo/screenshots/.",
+    "potential_impact": "A concrete problem (two fears) with a workflow that completes end to end, and reputation that routes around unreliable sellers. See docs/overview.md and the live journey.",
+    "innovation": "Settlement gated on an independent verdict, the buyer-approval step surfaced honestly, and reputation that feeds seller selection. The combination, not any single element, is the idea.",
+    "presentation": "A public 2:17 demo and an evidence pack that separates fresh checks from historical records. See docs/judge-demo/ and docs/FINAL_JUDGE_PACKAGE.md."
+  },
+  "documentation": {
+    "index": "docs/README.md",
+    "knowledge_map": "docs/knowledge-map.md",
+    "judge_package": "docs/FINAL_JUDGE_PACKAGE.md",
+    "detailed_metadata": "metadata/project.json",
+    "last_verified_commit": "79cecec",
+    "last_verified_date": "2026-11-08"
+  }
+}

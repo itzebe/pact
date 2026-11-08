@@ -93,10 +93,11 @@ and [`DEMO_EVIDENCE.md`](DEMO_EVIDENCE.md).
 | Backend `pytest tests/` | **619 passed, 0 skipped** |
 | `tests/test_settlement_pooling.py` | **14 passed** (PR #20 concurrency protection intact) |
 | `pyflakes pact/ scripts/` | clean |
-| Frontend `npm test` | **52 passed** |
+| Frontend `npm test` | **58 passed** |
 | Frontend `npm run build` | success |
 
-Counts are current as of commit `fb69db8` and reproducible with the commands in
+Backend counts were recorded at commit `fb69db8`; the frontend count (58) is current
+as of the LLM-discoverability change. All are reproducible with the commands in
 [`../README.md`](../README.md#3-tests) and [`development.md`](development.md). Without a
 PostgreSQL `DATABASE_URL` the same checkout reports **516 passed, 103 skipped** (the
 Postgres suites skip themselves); with `DATABASE_URL` it reports **613 passed, 6 skipped**;

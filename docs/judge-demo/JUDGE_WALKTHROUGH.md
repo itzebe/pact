@@ -201,10 +201,11 @@ with `DATABASE_URL` and `PGBOUNCER_URL` set, as in CI):
 | Backend `pytest tests/` | **619 passed, 0 skipped** (with a transaction-mode pooler endpoint set; see below) |
 | `tests/test_settlement_pooling.py` | **14 passed** |
 | Backend `pyflakes pact/ scripts/` | clean |
-| Frontend `npm test` | **52 passed** |
+| Frontend `npm test` | **58 passed** |
 | Frontend `npm run build` | success |
 
-Counts are current as of commit `fb69db8`. The backend figure depends on the database
+Backend counts were recorded at commit `fb69db8`; the frontend count (58) is current as
+of the LLM-discoverability change. The backend figure depends on the database
 configured, and all three are reproducible from a clean checkout: **516 passed, 103
 skipped** with no `DATABASE_URL` (the Postgres suites skip themselves), **613 passed, 6
 skipped** with `DATABASE_URL` set, and **619 passed, 0 skipped** once a transaction-mode

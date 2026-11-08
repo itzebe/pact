@@ -9,9 +9,13 @@
 
 This file is the compact, machine-oriented entry point to PACT's canonical
 documentation. It follows the [llms.txt](https://llmstxt.org/) convention. A longer
-consolidated version is at [`llms-full.txt`](llms-full.txt). The full documentation
-index is [`docs/README.md`](docs/README.md) and the navigation map is
-[`docs/knowledge-map.md`](docs/knowledge-map.md).
+consolidated version is at [`llms-full.txt`](https://github.com/itzebe/pact/blob/master/llms-full.txt). The full documentation
+index is [`docs/README.md`](https://github.com/itzebe/pact/blob/master/docs/README.md) and the navigation map is
+[`docs/knowledge-map.md`](https://github.com/itzebe/pact/blob/master/docs/knowledge-map.md).
+
+This file is served verbatim at <https://pact-flame.vercel.app/llms.txt>; the links
+below are repository-relative so they resolve on GitHub, and each is also reachable
+from the live site.
 
 - **Repository:** https://github.com/itzebe/pact
 - **Live application:** https://pact-flame.vercel.app/
@@ -48,7 +52,7 @@ that was delivered and verified.
 ## Verified capabilities
 
 Each is implemented and covered by tests in this repository (see
-[`docs/implementation-status.md`](docs/implementation-status.md) for the evidence):
+[`docs/implementation-status.md`](https://github.com/itzebe/pact/blob/master/docs/implementation-status.md) for the evidence):
 
 - Guest-first isolated sessions (server-provisioned, cookie + CSRF).
 - Job creation with a brief, acceptance criteria, and a hard budget ceiling.
@@ -79,26 +83,26 @@ Each is implemented and covered by tests in this repository (see
 
 ## Key documentation
 
-- [README](README.md) — product overview, quick start, API, deployment.
-- [docs/overview.md](docs/overview.md) — problem, philosophy, personas, journeys.
-- [docs/architecture.md](docs/architecture.md) — system, components, data flow.
-- [docs/payment-lifecycle.md](docs/payment-lifecycle.md) — every escrow stage.
-- [docs/database.md](docs/database.md) — schema, migrations, isolation, retention.
-- [docs/security.md](docs/security.md) — controls, threat model, verification.
-- [docs/ai-system.md](docs/ai-system.md) — the three AI roles and their boundaries.
-- [docs/api/README.md](docs/api/README.md) — the full HTTP API reference.
-- [docs/deployment.md](docs/deployment.md) — Vercel, Postgres, environment.
-- [docs/development.md](docs/development.md) — reproducible local setup.
-- [docs/faq.md](docs/faq.md) — grounded answers to common questions.
-- [docs/glossary.md](docs/glossary.md) — terminology.
-- [docs/implementation-status.md](docs/implementation-status.md) — implemented vs planned.
+- [README](https://github.com/itzebe/pact/blob/master/README.md) — product overview, quick start, API, deployment.
+- [docs/overview.md](https://github.com/itzebe/pact/blob/master/docs/overview.md) — problem, philosophy, personas, journeys.
+- [docs/architecture.md](https://github.com/itzebe/pact/blob/master/docs/architecture.md) — system, components, data flow.
+- [docs/payment-lifecycle.md](https://github.com/itzebe/pact/blob/master/docs/payment-lifecycle.md) — every escrow stage.
+- [docs/database.md](https://github.com/itzebe/pact/blob/master/docs/database.md) — schema, migrations, isolation, retention.
+- [docs/security.md](https://github.com/itzebe/pact/blob/master/docs/security.md) — controls, threat model, verification.
+- [docs/ai-system.md](https://github.com/itzebe/pact/blob/master/docs/ai-system.md) — the three AI roles and their boundaries.
+- [docs/api/README.md](https://github.com/itzebe/pact/blob/master/docs/api/README.md) — the full HTTP API reference.
+- [docs/deployment.md](https://github.com/itzebe/pact/blob/master/docs/deployment.md) — Vercel, Postgres, environment.
+- [docs/development.md](https://github.com/itzebe/pact/blob/master/docs/development.md) — reproducible local setup.
+- [docs/faq.md](https://github.com/itzebe/pact/blob/master/docs/faq.md) — grounded answers to common questions.
+- [docs/glossary.md](https://github.com/itzebe/pact/blob/master/docs/glossary.md) — terminology.
+- [docs/implementation-status.md](https://github.com/itzebe/pact/blob/master/docs/implementation-status.md) — implemented vs planned.
 
 ## API and security documentation
 
-- API reference: [docs/api/README.md](docs/api/README.md)
-- Security model and threat model: [docs/security.md](docs/security.md)
-- Authentication details: [docs/AUTH.md](docs/AUTH.md)
-- Architecture decisions: [docs/architecture-decisions/](docs/architecture-decisions/README.md)
+- API reference: [docs/api/README.md](https://github.com/itzebe/pact/blob/master/docs/api/README.md)
+- Security model and threat model: [docs/security.md](https://github.com/itzebe/pact/blob/master/docs/security.md)
+- Authentication details: [docs/AUTH.md](https://github.com/itzebe/pact/blob/master/docs/AUTH.md)
+- Architecture decisions: [docs/architecture-decisions/](https://github.com/itzebe/pact/blob/master/docs/architecture-decisions/README.md)
 
 ## Installation
 
@@ -112,7 +116,7 @@ export PACT_AUTH_SECRET="$(python -c 'import secrets; print(secrets.token_urlsaf
 uvicorn pact.main:app --reload --port 8000
 ```
 
-See [docs/development.md](docs/development.md) for the frontend and the test suites.
+See [docs/development.md](https://github.com/itzebe/pact/blob/master/docs/development.md) for the frontend and the test suites.
 
 ## Frequently asked questions (short)
 
@@ -125,12 +129,12 @@ See [docs/development.md](docs/development.md) for the frontend and the test sui
 - **What if PayPal times out?** The job is marked `unresolved` and must be
   reconciled by reading PayPal; it is never retried blindly.
 
-Full answers: [docs/faq.md](docs/faq.md).
+Full answers: [docs/faq.md](https://github.com/itzebe/pact/blob/master/docs/faq.md).
 
 ## Machine-readable metadata
 
-- [metadata/project.json](metadata/project.json) — identity, stack, status.
-- [metadata/features.json](metadata/features.json) — feature inventory with evidence.
-- [metadata/api.json](metadata/api.json) — endpoint inventory.
-- [metadata/security-controls.json](metadata/security-controls.json) — controls.
-- [metadata/evidence.json](metadata/evidence.json) — test and deployment evidence.
+- [metadata/project.json](https://github.com/itzebe/pact/blob/master/metadata/project.json) — identity, stack, status.
+- [metadata/features.json](https://github.com/itzebe/pact/blob/master/metadata/features.json) — feature inventory with evidence.
+- [metadata/api.json](https://github.com/itzebe/pact/blob/master/metadata/api.json) — endpoint inventory.
+- [metadata/security-controls.json](https://github.com/itzebe/pact/blob/master/metadata/security-controls.json) — controls.
+- [metadata/evidence.json](https://github.com/itzebe/pact/blob/master/metadata/evidence.json) — test and deployment evidence.
