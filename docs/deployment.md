@@ -184,4 +184,5 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<deployment>/api/jobs   # 401
 - Multi-instance safety: [`TOPOLOGY.md`](TOPOLOGY.md)
 - Database schema and migrations: [`database.md`](database.md)
 - Security controls: [`security.md`](security.md)
+- Running a controlled beta: [`beta-operations.md`](beta-operations.md)
 - Local setup: [`development.md`](development.md)

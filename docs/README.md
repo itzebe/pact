@@ -36,6 +36,8 @@ If you are new to PACT, read in this order: [`overview.md`](overview.md) →
 | Document | What it covers |
 |---|---|
 | [`deployment.md`](deployment.md) | Vercel, PostgreSQL, environment variables, verification. |
+| [`beta-operations.md`](beta-operations.md) | Running a controlled Sandbox beta: readiness checklist, signals, incident response. |
+| [`beta-launch-checklist.md`](beta-launch-checklist.md) | The controlled-beta launch plan: gates, cohort, scenarios, reporting, pause rules. |
 | [`development.md`](development.md) | Reproducible local setup and test execution. |
 | [`discoverability.md`](discoverability.md) | Repository metadata, topics, and LLM discoverability. |
 

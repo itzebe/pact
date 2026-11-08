@@ -85,11 +85,18 @@ and [`DEMO_EVIDENCE.md`](DEMO_EVIDENCE.md).
 
 | Suite | Result |
 | --- | --- |
-| Backend `pytest tests/` | **554 passed, 1 skipped** (skip = mock verifier non-determinism) |
-| `tests/test_settlement_pooling.py` | **13 passed** (PR #20 concurrency protection intact) |
+| Backend `pytest tests/` | **619 passed, 0 skipped** |
+| `tests/test_settlement_pooling.py` | **14 passed** (PR #20 concurrency protection intact) |
 | `pyflakes pact/ scripts/` | clean |
-| Frontend `npm test` | **40 passed** |
+| Frontend `npm test` | **52 passed** |
 | Frontend `npm run build` | success |
+
+Counts are current as of commit `fb69db8` and reproducible with the commands in
+[`../README.md`](../README.md#3-tests) and [`development.md`](development.md). Without a
+PostgreSQL `DATABASE_URL` the same checkout reports **516 passed, 103 skipped** (the
+Postgres suites skip themselves); with `DATABASE_URL` it reports **613 passed, 6 skipped**;
+adding a transaction-mode pooler endpoint via `PGBOUNCER_URL` reports **619 passed, 0
+skipped**. The backend suite collects 619 tests in all.
 
 ### 4.4 CI
 

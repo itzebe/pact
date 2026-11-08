@@ -32,15 +32,19 @@ The machine-readable version is [`metadata/evidence.json`](../../metadata/eviden
 | 2026-11-08 | Record the PR #30 release; correct stale release facts | PR #31 (`a9aabf6`) |
 | 2026-11-08 | Rate limit the money-bearing routes per identity | PR #32 (`530ced6`) |
 | 2026-11-08 | Beta-readiness: hardening headers, `/api` 404 fix, deterministic refund test | PR #33 (`41958ab`) |
+| 2026-11-08 | Record the PR #33 release and production verification (documentation) | PR #34 (`fb69db8`) |
 
-All 33 pull requests are merged into `master`; there are no open pull requests.
-Verified via the GitHub API at documentation time.
+All 34 pull requests are merged into `master`; there are no open pull requests.
+Verified via the GitHub API at documentation time. The latest merge on `master` is
+PR #34 (`fb69db8`, 2026-11-08), which records the PR #33 release.
 
 ## Release history
 
 PACT has **no tagged releases**. The `master` branch is the release. The latest
-merged change on `master` is PR #33 (`41958ab`, 2026-11-08), deployed to production
-at the same commit. See [`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
+**code release** on `master` is PR #33 (`41958ab`, 2026-11-08), deployed to
+production at that commit. The latest merge overall is PR #34 (`fb69db8`), a
+documentation change that records that release. See
+[`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
 
 ## Deployment references
 

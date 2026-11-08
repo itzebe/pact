@@ -46,6 +46,8 @@ REQUIRED_DOCS = [
     "docs/ai-system.md",
     "docs/api/README.md",
     "docs/deployment.md",
+    "docs/beta-operations.md",
+    "docs/beta-launch-checklist.md",
     "docs/development.md",
     "docs/faq.md",
     "docs/glossary.md",

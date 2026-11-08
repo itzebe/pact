@@ -28,7 +28,7 @@ workspace is provisioned automatically, with no account to create.
 >
 > - [Overview](docs/overview.md) · [Architecture](docs/architecture.md) · [Payment lifecycle](docs/payment-lifecycle.md)
 > - [Database](docs/database.md) · [Security](docs/security.md) · [AI system](docs/ai-system.md)
-> - [API reference](docs/api/README.md) · [Deployment](docs/deployment.md) · [Development](docs/development.md)
+> - [API reference](docs/api/README.md) · [Deployment](docs/deployment.md) · [Beta operations](docs/beta-operations.md) · [Beta launch checklist](docs/beta-launch-checklist.md) · [Development](docs/development.md)
 > - [FAQ](docs/faq.md) · [Glossary](docs/glossary.md) · [Implementation status](docs/implementation-status.md)
 > - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md)
 
