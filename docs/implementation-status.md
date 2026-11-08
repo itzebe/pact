@@ -52,7 +52,7 @@ check, it is marked *(live)*.
 | Money-route rate limiting | `core/rate_limit.py`, `api/routes.py` (`_enforce_rate_limit`) | Implemented and verified | `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py`, `tests/test_deployment_safety.py` (shared counter, guest keyed on address, fails closed, production refuses disable) |
 | Reputation + market selection | `core/store.py`, `core/dbstore.py`, `core/negotiation.py` | Implemented and verified | `tests/test_reconciliation_reputation.py` |
 | Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (52 tests); production app returns 200; axe-core reports 0 violations on the home and ledger views at 390/768/1440px |
-| Frontend code-splitting | `frontend/src/components/LedgerPanel.jsx`, `frontend/src/App.jsx` | Implemented and verified (on PR #33; not yet deployed) | `frontend/test/bundle-a11y.test.js`; the initial bundle is ~190 kB (AG Grid is loaded lazily on the Ledger tab, its own ~1.26 MB chunk). Production at `530ced6` still serves the pre-split ~1.14 MB initial chunk |
+| Frontend code-splitting | `frontend/src/components/LedgerPanel.jsx`, `frontend/src/App.jsx` | Implemented and verified (deployed) | `frontend/test/bundle-a11y.test.js`; the initial bundle is ~190 kB (AG Grid is loaded lazily on the Ledger tab, its own ~1.26 MB chunk). Verified live in production at `41958ab` on 2026-11-08 (`/assets/index-zW1Towtn.js`, 190,654 bytes) |
 | Deterministic production build | `frontend/vite.config.js` | Implemented and verified | `frontend/test/bundle-a11y.test.js`; the build pins `NODE_ENV=production`, so an ambient `NODE_ENV=development` can no longer ship React's development bundle (411 kB vs 190 kB). See `docs/architecture-decisions/0010-pin-node-env-for-build.md` |
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
 | Customer accounts + email outbox | `core/accounts.py`, `core/auth_store.py`, `core/email.py` | Implemented but partially verified | `tests/test_accounts.py`, `tests/test_auth_routes.py`, `tests/test_email_dispatcher.py`; the end-to-end email path needs a provider and is not exercised live |
@@ -90,7 +90,7 @@ Recorded in [`evidence/README.md`](evidence/README.md) and
 - Production `/api/health`: `status: ok`, `paypal.environment: sandbox`,
   `paypal.is_live: false`, `paypal.mode: sandbox`, `llm.is_mock: false`,
   `storage: {backend: postgres, durable: true}`, `rate_limit: {enabled: true,
-  scope: postgres}` *(live, deployed commit `530ced6`)*.
+  scope: postgres}` *(live, deployed commit `41958ab`)*.
 
 ## Related
 

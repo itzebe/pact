@@ -1,7 +1,7 @@
 {
   "schema_note": "Verification evidence for PACT: what was run, where, and with what result. Counts are real results from commands executed while writing this documentation (2026-11-08). A skip is not a pass; skipped tests and their reason are recorded.",
   "verification_date": "2026-11-08",
-  "verified_commit": "530ced6 (master) + the uncommitted beta-readiness documentation changes recorded here",
+  "verified_commit": "41958ab (master)",
   "environment": {
     "python": "3.13.15 (local verification container; CI runs 3.11)",
     "node": "24.22.1",
@@ -50,12 +50,30 @@
     }
   ],
   "skipped_tests": [
-    { "test": "tests/test_rate_limit_postgres.py:222", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler (run in CI and in the pooler configuration recorded above)" },
-    { "test": "tests/test_settlement_pooling.py:93", "reason": "PGBOUNCER_URL not set; need a distinct pooled endpoint to prove routing" },
-    { "test": "tests/test_settlement_pooling.py:111", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },
-    { "test": "tests/test_settlement_pooling.py:374", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },
-    { "test": "tests/test_settlement_pooling.py:420", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },
-    { "test": "tests/test_settlement_pooling.py:453", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" }
+    {
+      "test": "tests/test_rate_limit_postgres.py:222",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler (run in CI and in the pooler configuration recorded above)"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:93",
+      "reason": "PGBOUNCER_URL not set; need a distinct pooled endpoint to prove routing"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:111",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:374",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:420",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:453",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    }
   ],
   "live_checks": [
     {
@@ -81,13 +99,31 @@
       "command": "POST /api/jobs then POST /api/jobs/{id}/run with a buyer token",
       "result": "job reached 'voided' (verification failed the mock delivery); ledger chain_valid=true with 24 entries; settlement_is_real=false (simulated)",
       "verified": true
+    },
+    {
+      "name": "production_deployed_commit",
+      "command": "curl -sI https://pact-flame.vercel.app/ ; vercel API deployment list",
+      "result": "production alias serves all eight hardening headers (x-content-type-options, x-frame-options, content-security-policy, referrer-policy, permissions-policy, cross-origin-opener-policy, x-permitted-cross-domain-policies, strict-transport-security) and the initial JS bundle is /assets/index-zW1Towtn.js at 190,654 bytes (the code-split bundle). Deployment for 41958ab reached READY.",
+      "verified": true
+    },
+    {
+      "name": "production_api_404",
+      "command": "curl https://pact-flame.vercel.app/api/nope ; curl https://pact-flame.vercel.app/api",
+      "result": "both return 404 with content-type application/json (never the HTML shell)",
+      "verified": true
+    },
+    {
+      "name": "production_guest_sandbox_order",
+      "command": "POST /api/auth/guest ; POST /api/jobs ; POST /api/jobs/{id}/run?seller_ids=seller_atlas",
+      "result": "guest -> job -> run reached status=awaiting_approval in ~4.7s; escrow created a REAL PayPal sandbox order (order_id 3X88679598514163D), escrow.state=awaiting_approval, escrow.simulated=false, escrow.settlement_is_real=true; agreed_price=140.0; ledger_chain_valid=true with 10 entries. The run correctly stops for interactive buyer approval; capture/refund were not driven remotely.",
+      "verified": true
     }
   ],
   "production_metadata": {
     "repo": "https://github.com/itzebe/pact",
     "default_branch": "master",
-    "latest_master_commit": "530ced6",
-    "merged_pull_requests": 32,
+    "latest_master_commit": "41958ab",
+    "merged_pull_requests": 33,
     "open_pull_requests": 0,
     "github_topics_before": [],
     "license": "MIT"
@@ -98,7 +134,8 @@
     "No live real-money settlement was performed; the demo is PayPal Sandbox.",
     "The demo videos under docs/ are the project's own evidence; see docs/DEMO_EVIDENCE.md for what they do and do not establish.",
     "The PayPal Sandbox credentials in the Vercel project are stored as `sensitive`, which the Vercel API cannot read back. The live PayPal order/authorize flow was therefore NOT re-executed by the documentation pass; it is evidenced by the project's own demo recording, the production health probe (paypal.mode=sandbox, settlement_is_real=true), and the PayPal client tests. A genuine end-to-end sandbox settlement remains a manual, credentialed step.",
-    "Production at 530ced6 serves an initial JS bundle of 1.14 MB (measured live, /assets/index-BAvMc8sP.js, 2026-11-07); the 190 kB code-split initial bundle is shipped on PR #33 and not yet deployed. The docs state the split is on the PR, not production."
+    "Production now serves the 190 kB code-split initial bundle (/assets/index-zW1Towtn.js, measured live, 2026-11-08) \u2014 PR #33 is deployed at 41958ab.",
+    "The genuine PayPal Sandbox order-creation path was verified against production on 2026-11-08: a real sandbox order was created and the run stopped at awaiting_approval (simulated=false, settlement_is_real=true). The interactive buyer approval and the resulting capture/refund were NOT driven remotely because they require a PayPal login; that portion remains evidenced by the project's own demo recording and the PayPal client tests."
   ],
   "reference": "docs/evidence/README.md"
 }

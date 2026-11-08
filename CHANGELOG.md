@@ -6,10 +6,13 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #32**
-(`530ced6`, 2026-11-08).
+the `master` branch. The latest merge on `master` is **PR #33**
+(`41958ab`, 2026-11-08), deployed to production at the same commit.
 
-## Unreleased — beta-readiness hardening and documentation corrections
+## 2026-11-08 — PR #33: beta-readiness hardening, two release-blocking fixes, and documentation to the shipped state
+
+Deployed to production at `41958ab`; the live alias now serves all eight hardening
+headers and the 190 kB code-split initial bundle (measured live, 2026-11-08).
 
 ### Fixed — the production build could silently ship React's development bundle
 

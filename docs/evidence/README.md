@@ -31,14 +31,15 @@ The machine-readable version is [`metadata/evidence.json`](../../metadata/eviden
 | 2026-11-07 | Health reports `is_live`; fail closed on an unrecognised `PAYPAL_ENVIRONMENT` | PR #30 (`f1e146b`) |
 | 2026-11-08 | Record the PR #30 release; correct stale release facts | PR #31 (`a9aabf6`) |
 | 2026-11-08 | Rate limit the money-bearing routes per identity | PR #32 (`530ced6`) |
+| 2026-11-08 | Beta-readiness: hardening headers, `/api` 404 fix, deterministic refund test | PR #33 (`41958ab`) |
 
-All 32 pull requests are merged into `master`; there are no open pull requests.
+All 33 pull requests are merged into `master`; there are no open pull requests.
 Verified via the GitHub API at documentation time.
 
 ## Release history
 
 PACT has **no tagged releases**. The `master` branch is the release. The latest
-merged change on `master` is PR #32 (`530ced6`, 2026-11-08), deployed to production
+merged change on `master` is PR #33 (`41958ab`, 2026-11-08), deployed to production
 at the same commit. See [`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
 
 ## Deployment references
@@ -49,7 +50,7 @@ at the same commit. See [`CHANGELOG.md`](../../CHANGELOG.md) for the change hist
 - **Database:** PostgreSQL (Neon-compatible)
 - **Payments:** PayPal Sandbox
 
-Live health verified on 2026-11-08 (deployed commit `530ced6`):
+Live health verified on 2026-11-08 (deployed commit `41958ab`):
 
 ```json
 {
