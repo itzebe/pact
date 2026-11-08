@@ -64,6 +64,29 @@ the `master` branch. The latest merge on `master` is **PR #32**
   lazy ~1.26 MB chunk) instead of "planned". See
   `docs/architecture-decisions/0009-code-split-ledger-grid.md`.
 
+### Fixed — an unknown `/api` path was answered with the SPA shell (single-container image)
+
+- In the single-container image the SPA is mounted at `/` and its fallback returned
+  `index.html` for any extension-less path, so a mistyped or unknown `/api/...`
+  route (and the bare `/api`) was served the HTML shell with a `200` instead of a
+  JSON `404`. A client parsing that response as JSON fails confusingly, and the API
+  surface silently claims routes that do not exist. `_SPAStaticFiles` now re-raises
+  any `404` for a path under `/api` so the API answer stays a JSON `404`. The Vercel
+  deployment was already correct (it serves the SPA statically and routes `/api/*`
+  to the function); this aligns the image with it. Pinned by
+  `tests/test_spa_static.py::test_an_unknown_api_path_is_not_swallowed_by_the_spa_mount`.
+
+### Fixed — the guest refund test was dead coverage, not a flake
+
+- `tests/test_guests.py::test_a_guest_can_refund_its_own_settled_payment` skipped
+  deterministically: on a cold reputation ledger every seller scores 0.5, so the
+  deliberate bad actor (`seller_quill`) was always the cheapest, always won, and
+  every run voided — the refund assertion never executed. The test now seeds a
+  settled history for two competent sellers so selection is deterministic and the
+  run reaches `released`, and asserts that state instead of skipping. Backend counts
+  move accordingly: 516 / 613 / 619 passed (filesystem / PostgreSQL / + pooler),
+  with the pooler configuration now skipping nothing.
+
 ## 2026-11-08 — PR #32: rate limit the money-bearing routes per identity
 
 ### Added — per-identity fixed-window rate limiting on the money routes

@@ -81,10 +81,9 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **514 passed, 104 skipped**.
-- Backend (PostgreSQL 17): **611 passed, 7 skipped** (the 7 need a separate
-  transaction-mode pooler endpoint, `PGBOUNCER_URL`, which the CI job provides;
-  they were not run in this local verification).
+- Backend (filesystem store): **516 passed, 103 skipped**.
+- Backend (PostgreSQL 17): **613 passed, 6 skipped**.
+- Backend (PostgreSQL + transaction-mode pooler): **619 passed, 0 skipped**.
 - Frontend: **52 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.

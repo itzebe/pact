@@ -14,15 +14,22 @@
       "name": "backend_filesystem",
       "command": "cd backend && python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true PACT_AUTH_SECRET=<test>",
-      "result": "514 passed, 104 skipped",
-      "note": "The 104 skips are the PostgreSQL integration tests plus the pooled-endpoint tests, which skip themselves when no database (or no PGBOUNCER_URL) is reachable."
+      "result": "516 passed, 103 skipped",
+      "note": "The 103 skips are the PostgreSQL integration tests plus the pooled-endpoint tests, which skip themselves when no database (or no PGBOUNCER_URL) is reachable."
     },
     {
       "name": "backend_postgres",
       "command": "cd backend && DATABASE_URL=postgresql://... python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17",
-      "result": "611 passed, 7 skipped",
-      "note": "The 7 skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides; they were not run in this local verification."
+      "result": "613 passed, 6 skipped",
+      "note": "The 6 skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL); the third run below supplies one and reports zero skips."
+    },
+    {
+      "name": "backend_postgres_pooler",
+      "command": "cd backend && DATABASE_URL=postgresql://... PGBOUNCER_URL=postgresql://... python -m pytest tests/ -q",
+      "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17, PgBouncer transaction mode",
+      "result": "619 passed, 0 skipped",
+      "note": "Every environment-gated test ran: nothing was skipped in this configuration."
     },
     {
       "name": "frontend_unit",
@@ -43,8 +50,7 @@
     }
   ],
   "skipped_tests": [
-    { "test": "tests/test_guests.py:166", "reason": "the deterministic mock did not settle this run (environment-dependent)" },
-    { "test": "tests/test_rate_limit_postgres.py:222", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler (run in CI)" },
+    { "test": "tests/test_rate_limit_postgres.py:222", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler (run in CI and in the pooler configuration recorded above)" },
     { "test": "tests/test_settlement_pooling.py:93", "reason": "PGBOUNCER_URL not set; need a distinct pooled endpoint to prove routing" },
     { "test": "tests/test_settlement_pooling.py:111", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },
     { "test": "tests/test_settlement_pooling.py:374", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },

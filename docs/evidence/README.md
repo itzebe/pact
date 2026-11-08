@@ -68,20 +68,19 @@ Commands run on 2026-11-08 in the workspace container (Python 3.13.15, Node
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend (filesystem) | `python -m pytest tests/ -q` | **514 passed, 104 skipped** |
-| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **611 passed, 7 skipped** |
-| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **617 passed, 1 skipped** |
+| Backend (filesystem) | `python -m pytest tests/ -q` | **516 passed, 103 skipped** |
+| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **613 passed, 6 skipped** |
+| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **619 passed, 0 skipped** |
 | Frontend unit | `npm test` | **52 passed** |
 | Frontend build | `npm run build` | success |
 | Lint | `python -m pyflakes pact/ scripts/` | clean |
 
 The skips are environment-gated, not failures:
 
-- `tests/test_guests.py:166` — the deterministic mock did not settle this run
-  (environment-dependent).
 - `tests/test_settlement_pooling.py` (5 tests) and
   `tests/test_rate_limit_postgres.py` (1 test) — need a distinct transaction-mode
-  pooler endpoint (`PGBOUNCER_URL`), which the CI job provides.
+  pooler endpoint (`PGBOUNCER_URL`), which the CI job provides. With the pooler
+  reachable (the third row above) there are no skips.
 
 ## Demo instructions
 
