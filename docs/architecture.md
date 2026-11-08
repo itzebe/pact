@@ -152,6 +152,16 @@ the same state machine so the settlement logic under test is the real logic.
 - **`DatabasePool`** — a bounded per-instance connection pool; `direct()` connects to
   the unpooled endpoint for the settlement lock.
 
+### Money-route rate limiting (`core/rate_limit.py`)
+
+A fixed-window limiter guards every money-bearing route. It picks its backend from the
+same signal as the ticket and webhook stores: a shared PostgreSQL counter when
+`DATABASE_URL` is configured (so the limit is not spent once per instance), and a
+process-local counter otherwise (correct for the single-instance deployment that has
+no database). A configured-but-unreachable store yields an `unavailable` limiter that
+refuses every request. The identity is the signed token subject, or the client address
+for a guest or anonymous caller. `GET /api/health` reports the scope.
+
 ## API routes
 
 The full reference is [`api/README.md`](api/README.md). Summary:
@@ -264,6 +274,7 @@ flowchart TB
     routes --> auth
     routes --> engine
     routes --> webhooks
+    routes --> rate_limit
     auth_routes --> accounts
     auth_routes --> guests
     auth --> ticket_store
@@ -288,6 +299,7 @@ flowchart TB
     webhook_store --> pool
     ticket_store --> pool
     auth_store --> pool
+    rate_limit --> pool
 ```
 
 ## Related

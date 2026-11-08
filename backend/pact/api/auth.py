@@ -32,9 +32,32 @@ from typing import Annotated, Any
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 
 from ..config import ALLOWED_AUTH_ALGORITHMS, settings
+from ..core.auth_store import hash_identifier
 from ..core.ticket_store import ticket_store
 
 log = logging.getLogger("pact.auth")
+
+
+def client_ip_hash(request: Request) -> str:
+    """Hash of the client address, for rate limiting and audit only.
+
+    The *rightmost* ``x-forwarded-for`` entry is used: it is the one written by the
+    nearest trusted proxy (Vercel's edge, which documents that it overwrites this
+    header rather than appending to it). The leftmost entry is client-controllable
+    and would let a caller evade a per-address cap by forging a new value on every
+    request. Falling back to the socket peer keeps this correct when there is no
+    proxy in front. The value is hashed, never stored raw.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    candidate = ""
+    if forwarded:
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            candidate = parts[-1]
+    if not candidate:
+        candidate = request.client.host if request.client else "unknown"
+    return hash_identifier(candidate)
+
 
 # Roles. A principal holds exactly one; ``admin`` is deliberately separate from
 # ``buyer`` so a compromised buyer token cannot reconcile or delete records.

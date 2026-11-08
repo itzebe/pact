@@ -254,6 +254,44 @@ _PROD_BASE = {
 }
 
 
+def test_production_refuses_to_disable_money_route_rate_limiting(tmp_path):
+    """The money routes must not be unbounded in production.
+
+    Switching the guard off is a deliberate act, and it is refused where it
+    matters: unbounded provider calls from one caller is the condition the guard
+    exists to prevent.
+    """
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "PACT_RATE_LIMIT_ENABLED": "false",
+    })
+    assert any("PACT_RATE_LIMIT_ENABLED" in p for p in out["problems"]), out["problems"]
+    assert out["started"] is False
+
+
+def test_a_nonsensical_rate_limit_is_refused_in_production(tmp_path):
+    """A zero limit would silently disable the guard, so it is refused, not ignored."""
+    out = _run_startup({
+        **_PROD_BASE,
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "PACT_RATELIMIT_RUN_LIMIT": "0",
+    })
+    assert any("PACT_RATELIMIT_RUN_LIMIT" in p for p in out["problems"]), out["problems"]
+    assert out["started"] is False
+
+
+def test_a_nonsensical_rate_limit_is_reported_in_development(tmp_path):
+    """Development still starts, but the misconfiguration is surfaced, not hidden."""
+    out = _run_startup({
+        "PACT_ENV": "development",
+        "PACT_DATA_DIR": str(tmp_path / "data"),
+        "PACT_ALLOW_MOCK_PAYPAL": "true",
+        "PACT_RATELIMIT_RUN_LIMIT": "0",
+    })
+    assert any("PACT_RATELIMIT_RUN_LIMIT" in p for p in out["problems"]), out["problems"]
+
+
 def test_production_without_database_url_is_refused(tmp_path):
     out = _run_startup({**_PROD_BASE, "PACT_DATA_DIR": str(tmp_path / "data")})
     assert out["is_production"] is True

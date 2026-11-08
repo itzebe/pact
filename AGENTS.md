@@ -53,6 +53,7 @@ backend/pact/
 │   ├── webhooks.py    Apply verified PayPal events to payment state
 │   ├── webhook_store.py  Exactly-once webhook event registry
 │   ├── ticket_store.py   Single-use SSE ticket registry
+│   ├── rate_limit.py     Shared per-identity limits on the money routes
 │   ├── guests.py      Guest (judge) workspace provisioning
 │   ├── auth_store.py  Users, sessions, refresh tokens, email outbox
 │   ├── accounts.py    Customer account lifecycle
@@ -124,13 +125,17 @@ brief → negotiate → agree → HOLD (authorize) → deliver → verify → ca
   that the caller is a party to it; a non-owner gets `404`, not `403`.
 - Guest sessions are cookie-authenticated and require the CSRF token on mutating
   methods. Do not add a header path that accepts a guest token.
+- Every money-bearing route calls `_enforce_rate_limit` (`core/rate_limit.py`). Do
+  not add a money route without it, and do not remove it to make a test pass.
+  Production refuses to start with the guard disabled, and the shared counter must
+  fail closed (refuse) when its store is unreachable.
 
 ## 7. Testing requirements
 
 - Run the suite before and after a change:
   - `cd backend && python -m pytest tests/ -q` (filesystem store; Postgres tests
     self-skip).
-  - With a database: `DATABASE_URL=... python -m pytest tests/ -q` (the 5 pooler
+  - With a database: `DATABASE_URL=... python -m pytest tests/ -q` (the pooler
     routing tests still skip unless `PGBOUNCER_URL` is set; the CI job provides one).
   - `cd frontend && npm test`.
   - `cd backend && python -m pyflakes pact/ scripts/`.

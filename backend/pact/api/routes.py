@@ -22,6 +22,7 @@ from ..config import settings
 from ..core.engine import JobAlreadyRunning, RunDeadlineExceeded, ServerBusy, engine
 from ..core.models import EscrowState, Job
 from ..core.negotiation import default_seller_ids
+from ..core.rate_limit import enforce, identity_for, money_rule, rate_limiter
 from ..core.store import TERMINAL_ESCROW_STATES
 from ..core.webhooks import process_event
 from ..core.webhook_store import webhook_store
@@ -30,6 +31,7 @@ from .auth import (
     STREAM_TICKET_TTL,
     Principal,
     assert_can_access_job,
+    client_ip_hash,
     issue_stream_ticket,
     require_admin,
     require_buyer,
@@ -197,6 +199,16 @@ def health() -> dict[str, Any]:
         # Which persistence is actually in use, so a deployment can never be
         # mistaken for durable when it is not.
         "storage": storage,
+        # The money-route rate limiter. ``scope`` says whether the limit is shared
+        # across instances (postgres) or only correct for a single instance
+        # (memory), and "unavailable" means a configured shared store could not be
+        # opened — in which case every money route refuses rather than serving
+        # unbounded. No limit value or identity is exposed here.
+        "rate_limit": {
+            "enabled": settings.rate_limit.enabled,
+            "scope": rate_limiter.backend,
+            "shared": rate_limiter.shared,
+        },
     }
 
 
@@ -292,9 +304,11 @@ def list_jobs(
 @router.post("/jobs", status_code=201)
 async def create_job(
     payload: JobCreate,
+    request: Request,
     principal: Annotated[Principal, Depends(require_buyer)],
 ) -> dict[str, Any]:
     """Post a job. The buyer identity comes from the token, never the body."""
+    _enforce_rate_limit(request, principal, "job_create")
     _enforce_guest_job_quota(principal)
     job = engine.create_job(
         title=payload.title,
@@ -326,6 +340,27 @@ def _enforce_guest_job_quota(principal: Principal) -> None:
                 f"This guest workspace has reached its limit of "
                 f"{settings.auth.guest_max_jobs} jobs. Start a new session to continue."
             ),
+        )
+
+
+def _enforce_rate_limit(request: Request, principal: Principal, name: str) -> None:
+    """Bound how often one identity may call a money-bearing route.
+
+    Raises 429 with a ``Retry-After`` when the window is exhausted. The identity is
+    the authenticated subject, or — for a guest or anonymous caller — the hashed
+    client address, so minting fresh guest sessions from one address does not reset
+    the counter. The limit is skipped only when explicitly disabled, which production
+    refuses at startup.
+    """
+    if not settings.rate_limit.enabled:
+        return
+    identity = identity_for(principal.subject, principal.is_guest, client_ip_hash(request))
+    decision = enforce(f"money:{name}", identity, money_rule(name))
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests for this operation. Try again shortly.",
+            headers=decision.headers(),
         )
 
 
@@ -391,6 +426,7 @@ async def run_job(
     requests cannot produce a duplicate capture. A job whose lease has expired is
     reclaimable, so an interrupted run is not wedged forever.
     """
+    _enforce_rate_limit(request, principal, "run")
     job = _owned_job(principal, job_id)
 
     requested = _parse_seller_ids(seller_ids) or default_seller_ids()
@@ -421,6 +457,7 @@ async def run_job(
 @router.post("/jobs/{job_id}/approve")
 async def approve_job(
     job_id: str,
+    request: Request,
     principal: Annotated[Principal, Depends(require_buyer)],
     _verified: Annotated[Principal, Depends(require_verified)],
 ) -> dict[str, Any]:
@@ -433,6 +470,7 @@ async def approve_job(
     The approval is claimed atomically in the engine, so concurrent requests
     produce exactly one continuation; the losers get 409 rather than a 500.
     """
+    _enforce_rate_limit(request, principal, "approve")
     job = _owned_job(principal, job_id)
     if job.escrow.state is not EscrowState.AWAITING_APPROVAL:
         raise HTTPException(
@@ -451,6 +489,7 @@ async def approve_job(
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(
     job_id: str,
+    request: Request,
     principal: Annotated[Principal, Depends(require_buyer)],
     _verified: Annotated[Principal, Depends(require_verified)],
 ) -> dict[str, Any]:
@@ -460,6 +499,7 @@ async def cancel_job(
     discarding it. A job whose money has already moved, or whose fate is unknown,
     is refused with 409 and must be reconciled first. Idempotent.
     """
+    _enforce_rate_limit(request, principal, "cancel")
     job = _owned_job(principal, job_id)
     try:
         cancelled = await asyncio.to_thread(engine.cancel_job, job, "Cancelled by buyer")
@@ -479,6 +519,7 @@ async def cancel_job(
 @router.post("/jobs/{job_id}/reconcile")
 async def reconcile_job(
     job_id: str,
+    request: Request,
     principal: Annotated[Principal, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Resolve a job whose settlement outcome was never determined.
@@ -488,6 +529,7 @@ async def reconcile_job(
     Reconciliation is an administrative act — it can settle real money — so it
     requires an admin credential rather than the buyer's own.
     """
+    _enforce_rate_limit(request, principal, "reconcile")
     job = _job_or_404(job_id)
     if job.escrow.state is not EscrowState.UNRESOLVED:
         raise HTTPException(
@@ -508,6 +550,7 @@ class RefundRequest(BaseModel):
 @router.post("/jobs/{job_id}/refund")
 async def refund_job(
     job_id: str,
+    request: Request,
     principal: Annotated[Principal, Depends(require_buyer)],
     _verified: Annotated[Principal, Depends(require_verified)],
     body: RefundRequest | None = None,
@@ -525,6 +568,7 @@ async def refund_job(
     request is refused before PayPal is called. An ambiguous provider outcome returns
     502 and leaves the job unresolved rather than reporting a refund that did not land.
     """
+    _enforce_rate_limit(request, principal, "refund")
     job = _owned_job(principal, job_id)
     if job.escrow.state not in {EscrowState.RELEASED, EscrowState.REFUNDED}:
         raise HTTPException(
@@ -573,6 +617,7 @@ def _redact(value: Any) -> Any:
 @router.get("/jobs/{job_id}/paypal-order")
 async def get_paypal_order(
     job_id: str,
+    request: Request,
     principal: Annotated[Principal, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Read the live PayPal order behind a job. Read-only; moves no money.
@@ -580,8 +625,10 @@ async def get_paypal_order(
     Exists so a stuck buyer approval can be diagnosed from the provider's own
     record (status, intent, amount, payee) instead of inferring it from the
     approval link. Identity fields are redacted. Administrative: it reaches the
-    provider with the deployment's own credentials.
+    provider with the deployment's own credentials, so it is rate-limited like the
+    other provider-facing routes.
     """
+    _enforce_rate_limit(request, principal, "read")
     job = _job_or_404(job_id)
     if not job.escrow.order_id:
         raise HTTPException(status_code=409, detail="Job has no PayPal order")

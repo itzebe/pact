@@ -76,6 +76,7 @@ These are the guarantees that protect real money, and each is covered by a test:
 - **Reconciliation asks PayPal, it does not guess.** `POST /api/jobs/{id}/reconcile` reads the authorization (and the order, if the authorize itself was lost) to establish what actually happened. `CAPTURED` settles the job using the real capture id recovered from PayPal and credits the seller (reversing the failure recorded while the outcome was unknown); an intact hold clears the in-flight marker so the job is retryable; an unreachable PayPal leaves the job `unresolved` and blocked, because an outage is not evidence that no money moved.
 - **A void is confirmed.** After voiding, PACT re-reads the authorization and records whether PayPal confirmed it.
 - **No capture without a passing verdict.** A failed or inconclusive verification never reaches the capture call.
+- **Bounded money routes.** Every money-bearing route is rate limited per identity (a registered account by its signed subject, a guest by its client address), so one caller cannot drive unbounded provider calls. The counter is shared through PostgreSQL when configured, and a store that cannot be reached refuses rather than serving unbounded.
 
 ---
 
@@ -133,7 +134,7 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 465 passed, 90 skipped (the Postgres tests skip themselves). The skip count
+# 504 passed, 99 skipped (the Postgres tests skip themselves). The skip count
 # varies with whether the optional psycopg driver is installed.
 python -m pytest tests/ -q
 ```
@@ -147,7 +148,7 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 550 passed, 5 skipped. The 5 remaining skips need a separate transaction-mode
+# 597 passed, 6 skipped. The 6 remaining skips need a separate transaction-mode
 # pooler endpoint (PGBOUNCER_URL) to prove the settlement lock is not routed
 # through it; the CI job provides one.
 createdb pact                                          # or a Neon/Supabase/RDS URL

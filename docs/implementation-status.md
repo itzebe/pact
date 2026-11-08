@@ -48,6 +48,7 @@ check, it is marked *(live)*.
 | Fail-closed startup validation | `config.py`, `main.py` | Implemented and verified | `tests/test_security.py`, `tests/test_deployment_safety.py` |
 | Request body cap | `main.py` | Implemented and verified | `tests/test_security.py` |
 | Bounded run concurrency | `core/engine.py`, `api/routes.py` | Implemented and verified | `tests/test_security.py` |
+| Money-route rate limiting | `core/rate_limit.py`, `api/routes.py` (`_enforce_rate_limit`) | Implemented and verified | `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py`, `tests/test_deployment_safety.py` (shared counter, guest keyed on address, fails closed, production refuses disable) |
 | Reputation + market selection | `core/store.py`, `core/dbstore.py`, `core/negotiation.py` | Implemented and verified | `tests/test_reconciliation_reputation.py` |
 | Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (43 tests); production app returns 200; axe-core reports 0 violations and 0 sub-24px targets at 390/768/1440px (empty, negotiation, verification states) |
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
@@ -73,9 +74,10 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **487 passed, 94 skipped**.
-- Backend (PostgreSQL 17): **575 passed, 6 skipped** (the 6 need a separate
-  PgBouncer endpoint). With PgBouncer in transaction mode: **580 passed, 1 skipped**.
+- Backend (filesystem store): **504 passed, 99 skipped**.
+- Backend (PostgreSQL 17): **597 passed, 6 skipped** (the 6 need a separate
+  transaction-mode pooler endpoint, `PGBOUNCER_URL`, which the CI job provides;
+  they were not run in this local verification).
 - Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.

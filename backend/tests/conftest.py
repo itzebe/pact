@@ -51,3 +51,23 @@ def seller_headers() -> dict[str, str]:
 @pytest.fixture()
 def admin_headers() -> dict[str, str]:
     return bearer(ADMIN, "admin")
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """Clear the process-local rate-limit counter between tests.
+
+    The limiter is a module-level singleton, deliberately shared across requests in
+    a real deployment. In the suite every test acts as a fresh caller, so the
+    counter must start empty or an earlier test's money-route calls would exhaust
+    the window for a later one. A shared (PostgreSQL) limiter has no ``reset``;
+    its tests manage their own rows.
+    """
+    from pact.core.rate_limit import rate_limiter
+
+    reset = getattr(rate_limiter, "reset", None)
+    if callable(reset):
+        reset()
+    yield
+    if callable(reset):
+        reset()

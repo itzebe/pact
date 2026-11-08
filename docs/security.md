@@ -167,13 +167,43 @@ criteria, non-finite budget).
   process-local ticket registry).
 - Guest sessions + live PayPal host → refuse to start.
 - Mock settlement in production → refuse.
-- A configured-but-unreachable shared store → refuse (webhook `503`, ticket refused).
+- A configured-but-unreachable shared store → refuse (webhook `503`, ticket refused,
+  money-route rate limit refuses).
 - An unsupported auth algorithm → refuse.
+- A money-route rate limit that is disabled or nonsensical → refuse in production.
 
 *Source:* `backend/pact/config.py` (`validate_runtime`), `backend/pact/main.py`
 (`announce_configuration`).
 *Tests:* `tests/test_security.py` (`test_runtime_validation_flags_*`),
 `tests/test_deployment_safety.py`.
+
+### Money-route rate limiting
+
+- Every money-bearing route (`run`, `approve`, `cancel`, `refund`, `reconcile`, job
+  creation, and the admin provider-order read) is bounded per identity in a fixed
+  window. Exceeding it is a `429` with `Retry-After` and `X-RateLimit-*` headers.
+- The identity is the signed token subject for a registered account. A **guest is
+  keyed on its client address**, not its subject: a guest is anonymous and can mint a
+  fresh session at will, so keying on the subject would let it reset its own budget.
+  The address is the *rightmost* `X-Forwarded-For` entry (the one the trusted proxy
+  wrote), hashed and never stored raw — the same source the guest-session creation cap
+  uses.
+- The counter is shared through PostgreSQL whenever a database is configured, so the
+  limit is not spent once per instance. With no database the deployment is
+  single-instance by construction and a process-local counter is exactly as strong;
+  `GET /api/health` reports which one is in use (`rate_limit.scope`), so the response
+  never implies a distributed guarantee it does not have.
+- A configured-but-unreachable shared store **refuses** every money-route request
+  rather than serving unbounded, because the failure mode of a money route must be
+  "do not call the provider".
+- The guard is off only via `PACT_RATE_LIMIT_ENABLED=false`, which **production
+  refuses at startup**, and a nonsensical limit (zero, negative) is refused as well.
+
+*Source:* `backend/pact/core/rate_limit.py`, `backend/pact/api/routes.py`
+(`_enforce_rate_limit`), `backend/pact/config.py` (`RateLimitSettings`,
+`validate_runtime`).
+*Tests:* `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py`,
+`tests/test_deployment_safety.py` (`test_production_refuses_to_disable_money_route_rate_limiting`).
 
 ### Sandbox-only guard
 
@@ -227,15 +257,17 @@ deployment reads `environment: "sandbox"`, `is_live: false`, `mode: "sandbox"` a
 | 16 | Model output releases funds wrongly | Verifier verdict | Deterministic checks AND model judgement; strict fail-closed parse | `tests/test_verdict_coercion.py` |
 | 17 | Unbounded resource use | `run` concurrency | Bounded semaphore; run deadline; `429`/`504` | `tests/test_security.py` (excess runs refused, overrun abandoned) |
 | 18 | Non-durable ledger in production | Missing `DATABASE_URL` | Production refuses to start without a database | `tests/test_security.py`, `test_deployment_safety.py` |
+| 19 | Provider rate-limit exhaustion / repeated provider calls | Money routes | Per-identity fixed window (`429`); shared counter; fails closed | `tests/test_rate_limit.py`, `test_rate_limit_postgres.py` |
 
 ## Security testing
 
 The controls above are covered by the backend suite. The dedicated security file is
 `backend/tests/test_security.py` (the `test_*` cases referenced throughout this
 document), supported by `test_deployment_safety.py`, `test_guests.py`,
-`test_webhook_route.py`, `test_refund_route.py`, and the PostgreSQL integration
-tests. See [`implementation-status.md`](implementation-status.md) for current
-counts.
+`test_webhook_route.py`, `test_refund_route.py`, `test_rate_limit.py`, and the
+PostgreSQL integration tests (`test_ticket_store_postgres.py`,
+`test_rate_limit_postgres.py`). See [`implementation-status.md`](implementation-status.md)
+for current counts.
 
 ## What is not claimed
 

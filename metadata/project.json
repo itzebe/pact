@@ -14,8 +14,8 @@
     "license": "MIT",
     "language": "Python",
     "visibility": "public",
-    "latest_known_master_commit": "f1e146b",
-    "latest_known_master_pr": 30,
+    "latest_known_master_commit": "a9aabf6",
+    "latest_known_master_pr": 31,
     "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time."
   },
   "production": {
@@ -38,22 +38,54 @@
     }
   },
   "stack": {
-    "backend": ["Python 3.11", "FastAPI", "Pydantic v2", "sse-starlette", "httpx", "PyJWT", "argon2-cffi"],
-    "frontend": ["React 18", "Vite 6", "Tailwind CSS 3", "AG Grid Community"],
-    "database": ["PostgreSQL", "psycopg3", "psycopg_pool"],
-    "payments": ["PayPal Orders v2", "PayPal Payments v2"],
-    "ai": ["OpenAI-compatible chat completions", "Groq openai/gpt-oss-20b (deployed demo)"],
-    "hosting": ["Vercel", "Docker", "Render (config present)"],
-    "ci": ["GitHub Actions"]
+    "backend": [
+      "Python 3.11",
+      "FastAPI",
+      "Pydantic v2",
+      "sse-starlette",
+      "httpx",
+      "PyJWT",
+      "argon2-cffi"
+    ],
+    "frontend": [
+      "React 18",
+      "Vite 6",
+      "Tailwind CSS 3",
+      "AG Grid Community"
+    ],
+    "database": [
+      "PostgreSQL",
+      "psycopg3",
+      "psycopg_pool"
+    ],
+    "payments": [
+      "PayPal Orders v2",
+      "PayPal Payments v2"
+    ],
+    "ai": [
+      "OpenAI-compatible chat completions",
+      "Groq openai/gpt-oss-20b (deployed demo)"
+    ],
+    "hosting": [
+      "Vercel",
+      "Docker",
+      "Render (config present)"
+    ],
+    "ci": [
+      "GitHub Actions"
+    ]
   },
   "documentation": {
     "version": "1.0.0",
     "index": "docs/README.md",
     "knowledge_map": "docs/knowledge-map.md",
-    "llm_discovery": ["llms.txt", "llms-full.txt"],
+    "llm_discovery": [
+      "llms.txt",
+      "llms-full.txt"
+    ],
     "agent_instructions": "AGENTS.md",
-    "last_verified_commit": "f1e146b",
-    "last_verified_date": "2026-11-07"
+    "last_verified_commit": "a9aabf6",
+    "last_verified_date": "2026-11-08"
   },
   "status_vocabulary": [
     "implemented_verified",

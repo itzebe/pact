@@ -13,203 +13,384 @@
       "id": "guest_sessions",
       "name": "Guest sessions",
       "description": "Server-provisioned, isolated buyer workspaces so the product is usable with no account.",
-      "implementation": ["backend/pact/core/guests.py", "backend/pact/api/auth_routes.py", "backend/pact/api/auth.py"],
+      "implementation": [
+        "backend/pact/core/guests.py",
+        "backend/pact/api/auth_routes.py",
+        "backend/pact/api/auth.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_guests.py", "live: POST /api/auth/guest provisions a workspace"]
+      "evidence": [
+        "backend/tests/test_guests.py",
+        "live: POST /api/auth/guest provisions a workspace"
+      ]
     },
     {
       "id": "job_creation",
       "name": "Job creation",
       "description": "Post a job with a brief, acceptance criteria, and a hard budget ceiling.",
-      "implementation": ["backend/pact/api/routes.py", "backend/pact/core/engine.py", "backend/pact/core/models.py"],
+      "implementation": [
+        "backend/pact/api/routes.py",
+        "backend/pact/core/engine.py",
+        "backend/pact/core/models.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_api.py", "live: local run created a job"]
+      "evidence": [
+        "backend/tests/test_api.py",
+        "live: local run created a job"
+      ]
     },
     {
       "id": "negotiation",
       "name": "Offers and negotiation",
       "description": "Multi-round bargaining between buyer and seller agents with an in-code budget guardrail.",
-      "implementation": ["backend/pact/core/negotiation.py"],
+      "implementation": [
+        "backend/pact/core/negotiation.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_negotiation_convergence.py", "live: ledger shows offer/counter entries"]
+      "evidence": [
+        "backend/tests/test_negotiation_convergence.py",
+        "live: ledger shows offer/counter entries"
+      ]
     },
     {
       "id": "payment_authorization",
       "name": "Payment authorization (hold)",
       "description": "PayPal intent=AUTHORIZE order, buyer approval, then authorize; hold recorded only for a holdable status.",
-      "implementation": ["backend/pact/core/settlement.py", "backend/pact/paypal/escrow.py"],
+      "implementation": [
+        "backend/pact/core/settlement.py",
+        "backend/pact/paypal/escrow.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_escrow.py", "backend/tests/test_state_machine.py", "backend/tests/test_approval_return.py"]
+      "evidence": [
+        "backend/tests/test_escrow.py",
+        "backend/tests/test_state_machine.py",
+        "backend/tests/test_approval_return.py"
+      ]
     },
     {
       "id": "capture_settlement",
       "name": "Capture and settlement",
       "description": "Capture the authorization on a passing verification; settled only when capture status is COMPLETED.",
-      "implementation": ["backend/pact/core/settlement.py"],
+      "implementation": [
+        "backend/pact/core/settlement.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_state_machine.py", "backend/tests/test_lifecycle.py"]
+      "evidence": [
+        "backend/tests/test_state_machine.py",
+        "backend/tests/test_lifecycle.py"
+      ]
     },
     {
       "id": "void_return",
       "name": "Void (return on failed verification)",
       "description": "Void the hold on a failed verification and confirm the void by re-reading the authorization.",
-      "implementation": ["backend/pact/core/settlement.py"],
+      "implementation": [
+        "backend/pact/core/settlement.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_escrow.py", "live: local run ended voided with a confirmed void"]
+      "evidence": [
+        "backend/tests/test_escrow.py",
+        "live: local run ended voided with a confirmed void"
+      ]
     },
     {
       "id": "refund",
       "name": "Refund",
       "description": "Reverse a captured payment in full or in part, capped at the captured amount and idempotent per operation.",
-      "implementation": ["backend/pact/core/settlement.py", "backend/pact/api/routes.py"],
+      "implementation": [
+        "backend/pact/core/settlement.py",
+        "backend/pact/api/routes.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_refund.py", "backend/tests/test_refund_route.py"]
+      "evidence": [
+        "backend/tests/test_refund.py",
+        "backend/tests/test_refund_route.py"
+      ]
     },
     {
       "id": "duplicate_prevention",
       "name": "Duplicate capture/refund prevention",
       "description": "In-flight claim persisted before the provider call; settlement guard; per-operation idempotency keys.",
-      "implementation": ["backend/pact/core/settlement.py", "backend/pact/core/dbstore.py", "backend/pact/core/pool.py"],
+      "implementation": [
+        "backend/pact/core/settlement.py",
+        "backend/pact/core/dbstore.py",
+        "backend/pact/core/pool.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_settlement_pooling.py", "backend/tests/test_settlement_webhook_race.py"]
+      "evidence": [
+        "backend/tests/test_settlement_pooling.py",
+        "backend/tests/test_settlement_webhook_race.py"
+      ]
     },
     {
       "id": "reconciliation",
       "name": "Reconciliation of ambiguous outcomes",
       "description": "Resolve an unresolved job by reading PayPal directly; never a blind retry.",
-      "implementation": ["backend/pact/core/settlement.py", "backend/pact/api/routes.py"],
+      "implementation": [
+        "backend/pact/core/settlement.py",
+        "backend/pact/api/routes.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_ambiguous_settlement.py", "backend/tests/test_reconciliation_reputation.py"]
+      "evidence": [
+        "backend/tests/test_ambiguous_settlement.py",
+        "backend/tests/test_reconciliation_reputation.py"
+      ]
     },
     {
       "id": "ai_system",
       "name": "AI negotiation and verification",
       "description": "Seller, buyer-counter, and verifier roles over any OpenAI-compatible endpoint; a deterministic fallback when no key is set.",
-      "implementation": ["backend/pact/core/llm.py", "backend/pact/core/negotiation.py", "backend/pact/agents/seller.py", "backend/pact/core/settlement.py"],
+      "implementation": [
+        "backend/pact/core/llm.py",
+        "backend/pact/core/negotiation.py",
+        "backend/pact/agents/seller.py",
+        "backend/pact/core/settlement.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_llm_provider.py", "backend/tests/test_verdict_coercion.py", "live: production health reports is_mock=false"]
+      "evidence": [
+        "backend/tests/test_llm_provider.py",
+        "backend/tests/test_verdict_coercion.py",
+        "live: production health reports is_mock=false"
+      ]
     },
     {
       "id": "audit_ledger",
       "name": "Hash-chained audit ledger",
       "description": "Append-only per-job ledger with SHA-256 hash chaining; tamper-evident and verified live.",
-      "implementation": ["backend/pact/core/models.py", "backend/pact/api/routes.py"],
+      "implementation": [
+        "backend/pact/core/models.py",
+        "backend/pact/api/routes.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_api.py", "live: chain_valid=true on a 24-entry run"]
+      "evidence": [
+        "backend/tests/test_api.py",
+        "live: chain_valid=true on a 24-entry run"
+      ]
     },
     {
       "id": "durable_storage",
       "name": "Durable PostgreSQL ledger",
       "description": "JSONB job documents plus reputation, webhook, and ticket tables; instance-safe settlement claim.",
-      "implementation": ["backend/pact/core/dbstore.py", "backend/pact/core/pool.py"],
+      "implementation": [
+        "backend/pact/core/dbstore.py",
+        "backend/pact/core/pool.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_postgres_store.py", "live: production health storage.backend=postgres, durable=true"]
+      "evidence": [
+        "backend/tests/test_postgres_store.py",
+        "live: production health storage.backend=postgres, durable=true"
+      ]
     },
     {
       "id": "webhooks",
       "name": "Webhook verification and exactly-once processing",
       "description": "Verify a PayPal webhook signature through PayPal's own endpoint and apply each event at most once.",
-      "implementation": ["backend/pact/paypal/escrow.py", "backend/pact/core/webhooks.py", "backend/pact/core/webhook_store.py", "backend/pact/api/routes.py"],
+      "implementation": [
+        "backend/pact/paypal/escrow.py",
+        "backend/pact/core/webhooks.py",
+        "backend/pact/core/webhook_store.py",
+        "backend/pact/api/routes.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_webhook_route.py", "backend/tests/test_webhook_persistence.py", "backend/tests/test_webhook_postgres.py"]
+      "evidence": [
+        "backend/tests/test_webhook_route.py",
+        "backend/tests/test_webhook_persistence.py",
+        "backend/tests/test_webhook_postgres.py"
+      ]
     },
     {
       "id": "sse_stream",
       "name": "Live SSE ledger stream",
       "description": "Server-sent events of the job's ledger, authenticated by a single-use ticket or a bearer header.",
-      "implementation": ["backend/pact/api/routes.py", "backend/pact/core/ticket_store.py"],
+      "implementation": [
+        "backend/pact/api/routes.py",
+        "backend/pact/core/ticket_store.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_api.py", "backend/tests/test_security.py"]
+      "evidence": [
+        "backend/tests/test_api.py",
+        "backend/tests/test_security.py"
+      ]
     },
     {
       "id": "auth",
       "name": "Bearer authentication and roles",
       "description": "HS256 bearer tokens with buyer/seller/admin roles; fail closed without a secret.",
-      "implementation": ["backend/pact/api/auth.py", "backend/pact/config.py"],
+      "implementation": [
+        "backend/pact/api/auth.py",
+        "backend/pact/config.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_security.py"]
+      "evidence": [
+        "backend/tests/test_security.py"
+      ]
     },
     {
       "id": "authorization",
       "name": "Object-level authorization",
       "description": "Every job access checks party membership; a non-owner gets 404, not 403.",
-      "implementation": ["backend/pact/api/routes.py", "backend/pact/api/auth.py"],
+      "implementation": [
+        "backend/pact/api/routes.py",
+        "backend/pact/api/auth.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_security.py"]
+      "evidence": [
+        "backend/tests/test_security.py"
+      ]
     },
     {
       "id": "csrf",
       "name": "CSRF protection for guest sessions",
       "description": "Cookie-authenticated mutating requests must echo the session CSRF token.",
-      "implementation": ["backend/pact/api/auth.py", "backend/pact/core/guests.py"],
+      "implementation": [
+        "backend/pact/api/auth.py",
+        "backend/pact/core/guests.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_guests.py"]
+      "evidence": [
+        "backend/tests/test_guests.py"
+      ]
     },
     {
       "id": "sandbox_guard",
       "name": "Sandbox-only guard and fail-closed validation",
       "description": "Refuse a live PayPal host; refuse to start in production without a secret, a database, or with a mock settlement.",
-      "implementation": ["backend/pact/config.py", "backend/pact/main.py"],
+      "implementation": [
+        "backend/pact/config.py",
+        "backend/pact/main.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_security.py", "backend/tests/test_deployment_safety.py"]
+      "evidence": [
+        "backend/tests/test_security.py",
+        "backend/tests/test_deployment_safety.py"
+      ]
     },
     {
       "id": "bounded_resources",
       "name": "Bounded request bodies and run concurrency",
       "description": "64 KiB request cap on received bytes; a bounded semaphore for concurrent runs; run deadline.",
-      "implementation": ["backend/pact/main.py", "backend/pact/core/engine.py", "backend/pact/api/routes.py"],
+      "implementation": [
+        "backend/pact/main.py",
+        "backend/pact/core/engine.py",
+        "backend/pact/api/routes.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_security.py"]
+      "evidence": [
+        "backend/tests/test_security.py"
+      ]
     },
     {
       "id": "reputation",
       "name": "Reputation and market selection",
       "description": "A smoothed verified-delivery score per seller, fed back into seller selection.",
-      "implementation": ["backend/pact/core/store.py", "backend/pact/core/dbstore.py", "backend/pact/core/negotiation.py"],
+      "implementation": [
+        "backend/pact/core/store.py",
+        "backend/pact/core/dbstore.py",
+        "backend/pact/core/negotiation.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_reconciliation_reputation.py"]
+      "evidence": [
+        "backend/tests/test_reconciliation_reputation.py"
+      ]
     },
     {
       "id": "frontend",
       "name": "Guest-first frontend",
       "description": "React/Vite/Tailwind UI: composer, negotiation, verification, ledger, payment panel, reputation.",
-      "implementation": ["frontend/src/"],
+      "implementation": [
+        "frontend/src/"
+      ],
       "status": "implemented_verified",
-      "evidence": ["frontend/test/*.js (43 tests)", "live: production root returns 200"]
+      "evidence": [
+        "frontend/test/*.js (43 tests)",
+        "live: production root returns 200"
+      ]
     },
     {
       "id": "customer_accounts",
       "name": "Customer accounts and email outbox",
       "description": "Opt-in self-service accounts (Argon2id, rotating refresh tokens) and a crash-safe transactional email outbox.",
-      "implementation": ["backend/pact/core/accounts.py", "backend/pact/core/auth_store.py", "backend/pact/core/email.py", "backend/pact/core/passwords.py"],
+      "implementation": [
+        "backend/pact/core/accounts.py",
+        "backend/pact/core/auth_store.py",
+        "backend/pact/core/email.py",
+        "backend/pact/core/passwords.py"
+      ],
       "status": "implemented_partially_verified",
-      "evidence": ["backend/tests/test_accounts.py", "backend/tests/test_auth_routes.py", "backend/tests/test_email_dispatcher.py"],
+      "evidence": [
+        "backend/tests/test_accounts.py",
+        "backend/tests/test_auth_routes.py",
+        "backend/tests/test_email_dispatcher.py"
+      ],
       "note": "The end-to-end email delivery path needs a real provider and verified sending domain; it is not exercised live."
     },
     {
       "id": "pooled_settlement_routing",
       "name": "Pooled-endpoint settlement routing",
       "description": "Prove the settlement session lock is not routed through a transaction-mode pooler.",
-      "implementation": ["backend/pact/core/pool.py", "backend/pact/core/dbstore.py"],
+      "implementation": [
+        "backend/pact/core/pool.py",
+        "backend/pact/core/dbstore.py"
+      ],
       "status": "implemented_partially_verified",
-      "evidence": ["backend/tests/test_settlement_pooling.py"],
+      "evidence": [
+        "backend/tests/test_settlement_pooling.py"
+      ],
       "note": "These tests run only when PGBOUNCER_URL is set (the CI job provides it); a bare local run skips 5 tests."
     },
     {
       "id": "pool_configuration",
       "name": "Configurable pool limits",
       "description": "Operator-set PACT_PG_POOL_* / PACT_PG_STATEMENT_TIMEOUT_MS are applied to the shared connection pool; an explicit keyword overrides them, and an impossible value is rejected at startup.",
-      "implementation": ["backend/pact/config.py", "backend/pact/core/pool.py"],
+      "implementation": [
+        "backend/pact/config.py",
+        "backend/pact/core/pool.py"
+      ],
       "status": "implemented_verified",
-      "evidence": ["backend/tests/test_pool_config.py"],
+      "evidence": [
+        "backend/tests/test_pool_config.py"
+      ],
       "note": "Previously a known gap: the settings were defined but never passed to get_pool."
+    },
+    {
+      "id": "money_route_rate_limiting",
+      "name": "Money-route rate limiting",
+      "description": "Per-identity fixed-window ceilings on the money-bearing routes (run, approve, cancel, reconcile, refund, job create, provider-order read). A guest is keyed on its client address so minting a fresh session does not reset its budget; a registered account is keyed on its signed subject. The counter is shared through PostgreSQL so the limit is not spent once per instance, and a configured-but-unreachable store refuses rather than serving unbounded.",
+      "implementation": [
+        "backend/pact/core/rate_limit.py",
+        "backend/pact/api/routes.py",
+        "backend/pact/api/auth.py",
+        "backend/pact/config.py"
+      ],
+      "status": "implemented_verified",
+      "evidence": [
+        "backend/tests/test_rate_limit.py",
+        "backend/tests/test_rate_limit_postgres.py",
+        "backend/tests/test_deployment_safety.py"
+      ],
+      "note": "Disabled only by PACT_RATE_LIMIT_ENABLED=false, which production refuses at startup. GET /api/health reports the scope (postgres | memory | unavailable)."
     }
   ],
   "not_implemented": [
-    { "name": "Frontend code-splitting", "status": "planned" },
-    { "name": "Real-money deployment path with operational controls", "status": "planned" },
-    { "name": "Pluggable verifiers", "status": "planned" },
-    { "name": "Additional settlement rails behind the escrow interface", "status": "planned" },
-    { "name": "Independent security audit or certification", "status": "planned" }
+    {
+      "name": "Frontend code-splitting",
+      "status": "planned"
+    },
+    {
+      "name": "Real-money deployment path with operational controls",
+      "status": "planned"
+    },
+    {
+      "name": "Pluggable verifiers",
+      "status": "planned"
+    },
+    {
+      "name": "Additional settlement rails behind the escrow interface",
+      "status": "planned"
+    },
+    {
+      "name": "Independent security audit or certification",
+      "status": "planned"
+    }
   ]
 }

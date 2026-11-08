@@ -4,46 +4,264 @@
   "interactive_docs": "/docs",
   "auth": {
     "schemes": [
-      { "type": "http", "scheme": "bearer", "description": "HS256 JWT minted by scripts/issue_token.py" },
-      { "type": "apiKey", "in": "cookie", "name": "pact_guest", "description": "Guest session cookie; mutating methods must also send X-CSRF-Token" }
+      {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "HS256 JWT minted by scripts/issue_token.py"
+      },
+      {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "pact_guest",
+        "description": "Guest session cookie; mutating methods must also send X-CSRF-Token"
+      }
     ],
-    "csrf": { "header": "X-CSRF-Token", "required_for": ["POST", "PUT", "PATCH", "DELETE"], "when": "cookie-authenticated (guest) requests" }
+    "csrf": {
+      "header": "X-CSRF-Token",
+      "required_for": [
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
+      "when": "cookie-authenticated (guest) requests"
+    }
   },
   "rate_limits": [
-    { "scope": "run", "mechanism": "bounded semaphore PACT_MAX_CONCURRENT_RUNS", "response": "429 with Retry-After: 2" },
-    { "scope": "guest_sessions", "mechanism": "new workspaces per client IP per window", "response": "429" },
-    { "scope": "guest_jobs", "mechanism": "per-workspace job quota PACT_GUEST_MAX_JOBS", "response": "429" }
+    {
+      "scope": "run",
+      "mechanism": "bounded semaphore PACT_MAX_CONCURRENT_RUNS",
+      "response": "429 with Retry-After: 2"
+    },
+    {
+      "scope": "guest_sessions",
+      "mechanism": "new workspaces per client IP per window",
+      "response": "429"
+    },
+    {
+      "scope": "guest_jobs",
+      "mechanism": "per-workspace job quota PACT_GUEST_MAX_JOBS",
+      "response": "429"
+    },
+    {
+      "scope": "money_routes",
+      "mechanism": "per-identity fixed window (PACT_RATELIMIT_*), shared through PostgreSQL when configured; 429 with Retry-After and X-RateLimit-* headers when exhausted",
+      "routes": [
+        "POST /api/jobs",
+        "POST /api/jobs/{id}/run",
+        "POST /api/jobs/{id}/approve",
+        "POST /api/jobs/{id}/cancel",
+        "POST /api/jobs/{id}/refund",
+        "POST /api/jobs/{id}/reconcile",
+        "GET /api/jobs/{id}/paypal-order"
+      ],
+      "source": "backend/pact/core/rate_limit.py"
+    }
   ],
   "endpoints": [
-    { "method": "GET", "path": "/api/health", "role": "public", "purpose": "Configuration and settlement mode", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/paypal/webhook", "role": "public (signature)", "purpose": "Apply a verified PayPal event", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/auth/guest", "role": "public", "purpose": "Provision a guest workspace and set the session cookie", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "GET", "path": "/api/auth/guest", "role": "guest-cookie", "purpose": "Report the current guest session", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/guest/logout", "role": "public", "purpose": "Clear the guest session cookie", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/register", "role": "public (opt-in)", "purpose": "Create a customer account (404 when disabled)", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/verify-email", "role": "public (opt-in)", "purpose": "Consume a single-use verification token", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/login", "role": "public (opt-in)", "purpose": "Start a customer session", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/refresh", "role": "public (opt-in)", "purpose": "Rotate a refresh token", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/logout", "role": "public (opt-in)", "purpose": "Revoke a refresh family", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "GET", "path": "/api/auth/me", "role": "any", "purpose": "Current principal", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/password/forgot", "role": "public (opt-in)", "purpose": "Request a password reset", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/password/reset", "role": "public (opt-in)", "purpose": "Reset a password with a token", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/auth/password/change", "role": "any", "purpose": "Change a password", "source": "backend/pact/api/auth_routes.py" },
-    { "method": "POST", "path": "/api/jobs", "role": "buyer", "purpose": "Post a job", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/jobs", "role": "any", "purpose": "List jobs visible to the caller", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/jobs/{job_id}", "role": "owner", "purpose": "Full job state", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/jobs/{job_id}/run", "role": "owner buyer", "purpose": "Run the full lifecycle", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/jobs/{job_id}/approve", "role": "owner buyer", "purpose": "Continue after buyer approval", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/jobs/{job_id}/cancel", "role": "owner buyer", "purpose": "Void any hold so the job can be deleted", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/jobs/{job_id}/refund", "role": "owner buyer", "purpose": "Refund a captured payment", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/jobs/{job_id}/reconcile", "role": "admin", "purpose": "Resolve an unresolved job by reading PayPal", "source": "backend/pact/api/routes.py" },
-    { "method": "DELETE", "path": "/api/jobs/{job_id}", "role": "admin", "purpose": "Tombstone a fully resolved job", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/jobs/{job_id}/ledger", "role": "owner", "purpose": "Audit trail and chain validity", "source": "backend/pact/api/routes.py" },
-    { "method": "POST", "path": "/api/jobs/{job_id}/stream-ticket", "role": "owner", "purpose": "Mint a single-use SSE ticket", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/jobs/{job_id}/stream", "role": "owner", "purpose": "Server-sent events of the ledger", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/jobs/{job_id}/paypal-order", "role": "admin", "purpose": "Provider order record (redacted)", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/reputation", "role": "any", "purpose": "Agent reputation", "source": "backend/pact/api/routes.py" },
-    { "method": "GET", "path": "/api/ledger", "role": "any (scoped)", "purpose": "Settlement decisions visible to the caller", "source": "backend/pact/api/routes.py" }
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "role": "public",
+      "purpose": "Configuration and settlement mode",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/paypal/webhook",
+      "role": "public (signature)",
+      "purpose": "Apply a verified PayPal event",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/guest",
+      "role": "public",
+      "purpose": "Provision a guest workspace and set the session cookie",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/guest",
+      "role": "guest-cookie",
+      "purpose": "Report the current guest session",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/guest/logout",
+      "role": "public",
+      "purpose": "Clear the guest session cookie",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "role": "public (opt-in)",
+      "purpose": "Create a customer account (404 when disabled)",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify-email",
+      "role": "public (opt-in)",
+      "purpose": "Consume a single-use verification token",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "role": "public (opt-in)",
+      "purpose": "Start a customer session",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/refresh",
+      "role": "public (opt-in)",
+      "purpose": "Rotate a refresh token",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "role": "public (opt-in)",
+      "purpose": "Revoke a refresh family",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "role": "any",
+      "purpose": "Current principal",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/forgot",
+      "role": "public (opt-in)",
+      "purpose": "Request a password reset",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/reset",
+      "role": "public (opt-in)",
+      "purpose": "Reset a password with a token",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password/change",
+      "role": "any",
+      "purpose": "Change a password",
+      "source": "backend/pact/api/auth_routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs",
+      "role": "buyer",
+      "purpose": "Post a job",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs",
+      "role": "any",
+      "purpose": "List jobs visible to the caller",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/{job_id}",
+      "role": "owner",
+      "purpose": "Full job state",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/run",
+      "role": "owner buyer",
+      "purpose": "Run the full lifecycle",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/approve",
+      "role": "owner buyer",
+      "purpose": "Continue after buyer approval",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/cancel",
+      "role": "owner buyer",
+      "purpose": "Void any hold so the job can be deleted",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/refund",
+      "role": "owner buyer",
+      "purpose": "Refund a captured payment",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/reconcile",
+      "role": "admin",
+      "purpose": "Resolve an unresolved job by reading PayPal",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/jobs/{job_id}",
+      "role": "admin",
+      "purpose": "Tombstone a fully resolved job",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/{job_id}/ledger",
+      "role": "owner",
+      "purpose": "Audit trail and chain validity",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/stream-ticket",
+      "role": "owner",
+      "purpose": "Mint a single-use SSE ticket",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/{job_id}/stream",
+      "role": "owner",
+      "purpose": "Server-sent events of the ledger",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/{job_id}/paypal-order",
+      "role": "admin",
+      "purpose": "Provider order record (redacted)",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reputation",
+      "role": "any",
+      "purpose": "Agent reputation",
+      "source": "backend/pact/api/routes.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ledger",
+      "role": "any (scoped)",
+      "purpose": "Settlement decisions visible to the caller",
+      "source": "backend/pact/api/routes.py"
+    }
   ],
   "error_codes": {
     "400": "Malformed input (malformed webhook body, unknown seller)",

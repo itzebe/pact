@@ -1,9 +1,9 @@
 {
   "schema_note": "Verification evidence for PACT: what was run, where, and with what result. Counts are real results from commands executed while writing this documentation (2026-11-07). A skip is not a pass; skipped tests and their reason are recorded.",
-  "verification_date": "2026-11-07",
-  "verified_commit": "f1e146b",
+  "verification_date": "2026-11-08",
+  "verified_commit": "a9aabf6",
   "environment": {
-    "python": "3.11.17",
+    "python": "3.13.15 (local verification container; CI runs 3.11)",
     "node": "24.22.1",
     "npm": "11.21.0",
     "postgresql": "17 (Debian)",
@@ -14,15 +14,15 @@
       "name": "backend_filesystem",
       "command": "cd backend && python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true PACT_AUTH_SECRET=<test>",
-      "result": "487 passed, 94 skipped",
-      "note": "The 94 skips are the PostgreSQL integration tests, which skip themselves when no database is reachable."
+      "result": "504 passed, 99 skipped",
+      "note": "The 99 skips are the PostgreSQL integration tests, which skip themselves when no database is reachable."
     },
     {
       "name": "backend_postgres",
       "command": "cd backend && DATABASE_URL=postgresql://... python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17",
-      "result": "575 passed, 6 skipped",
-      "note": "The skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides. With PgBouncer in transaction mode the same suite is 580 passed, 1 skipped."
+      "result": "597 passed, 6 skipped",
+      "note": "The 6 skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides; they were not run in this local verification."
     },
     {
       "name": "frontend_unit",
@@ -43,11 +43,26 @@
     }
   ],
   "skipped_tests": [
-    { "test": "tests/test_guests.py:166", "reason": "the deterministic mock did not settle this run (environment-dependent)" },
-    { "test": "tests/test_settlement_pooling.py:93", "reason": "PGBOUNCER_URL not set; need a distinct pooled endpoint to prove routing" },
-    { "test": "tests/test_settlement_pooling.py:111", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },
-    { "test": "tests/test_settlement_pooling.py:374", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" },
-    { "test": "tests/test_settlement_pooling.py:420", "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler" }
+    {
+      "test": "tests/test_guests.py:166",
+      "reason": "the deterministic mock did not settle this run (environment-dependent)"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:93",
+      "reason": "PGBOUNCER_URL not set; need a distinct pooled endpoint to prove routing"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:111",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:374",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    },
+    {
+      "test": "tests/test_settlement_pooling.py:420",
+      "reason": "PGBOUNCER_URL not set; need a transaction-mode pooler"
+    }
   ],
   "live_checks": [
     {

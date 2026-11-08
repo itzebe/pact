@@ -240,10 +240,55 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class RateLimitSettings:
+    """Ceilings on how often the money-bearing routes may be called.
+
+    These are per (endpoint, identity) fixed windows. They exist so one caller
+    cannot drive unbounded PayPal calls or exhaust the provider's own rate limit
+    for everyone. The defaults are deliberately generous for a human evaluator and
+    only bite a runaway client or a script. Setting ``PACT_RATE_LIMIT_ENABLED=false``
+    disables the guard, which is refused in production (see ``validate_runtime``).
+    """
+
+    enabled: bool = field(default_factory=lambda: _bool("PACT_RATE_LIMIT_ENABLED", True))
+    #: Run drives authorize + deliver + verify + capture: the heaviest, most
+    #: money-bearing call, and the one that reaches PayPal the most times.
+    run_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_RUN_LIMIT", "10")))
+    run_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_RUN_WINDOW_SECONDS", "300"))
+    )
+    approve_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_APPROVE_LIMIT", "30")))
+    approve_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_APPROVE_WINDOW_SECONDS", "300"))
+    )
+    cancel_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_CANCEL_LIMIT", "30")))
+    cancel_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_CANCEL_WINDOW_SECONDS", "300"))
+    )
+    reconcile_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_RECONCILE_LIMIT", "60")))
+    reconcile_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_RECONCILE_WINDOW_SECONDS", "300"))
+    )
+    refund_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_REFUND_LIMIT", "20")))
+    refund_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_REFUND_WINDOW_SECONDS", "300"))
+    )
+    job_create_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_JOB_CREATE_LIMIT", "30")))
+    job_create_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_JOB_CREATE_WINDOW_SECONDS", "300"))
+    )
+    read_limit: int = field(default_factory=lambda: int(os.getenv("PACT_RATELIMIT_READ_LIMIT", "120")))
+    read_window_seconds: int = field(
+        default_factory=lambda: int(os.getenv("PACT_RATELIMIT_READ_WINDOW_SECONDS", "60"))
+    )
+
+
+@dataclass(frozen=True)
 class Settings:
     paypal: PayPalSettings = field(default_factory=PayPalSettings)
     llm: LLMSettings = field(default_factory=LLMSettings)
     auth: AuthSettings = field(default_factory=AuthSettings)
+    rate_limit: RateLimitSettings = field(default_factory=RateLimitSettings)
     currency: str = field(default_factory=lambda: os.getenv("PACT_CURRENCY", "USD"))
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("PACT_DATA_DIR", str(ROOT / "data"))))
     # Postgres is used when set. Serverless platforms have no durable disk, so a
@@ -496,6 +541,31 @@ class Settings:
                 "PACT_PG_STATEMENT_TIMEOUT_MS cannot be negative, got "
                 f"{self.pg_statement_timeout_ms}"
             )
+        # The money-route rate limits. A production deployment must not run with the
+        # guard disabled: unbounded provider calls from one caller is exactly the
+        # condition the guard exists to prevent, so switching it off is refused where
+        # it matters rather than silently accepted. A nonsensical limit (zero,
+        # negative, or a window that bounds nothing) is refused in every environment.
+        if self.is_production and not self.rate_limit.enabled:
+            problems.append(
+                "PACT_RATE_LIMIT_ENABLED is false, so the money routes would be "
+                "unbounded; enable it in production"
+            )
+        if self.rate_limit.enabled:
+            checks = {
+                "PACT_RATELIMIT_RUN": (self.rate_limit.run_limit, self.rate_limit.run_window_seconds),
+                "PACT_RATELIMIT_APPROVE": (self.rate_limit.approve_limit, self.rate_limit.approve_window_seconds),
+                "PACT_RATELIMIT_CANCEL": (self.rate_limit.cancel_limit, self.rate_limit.cancel_window_seconds),
+                "PACT_RATELIMIT_RECONCILE": (self.rate_limit.reconcile_limit, self.rate_limit.reconcile_window_seconds),
+                "PACT_RATELIMIT_REFUND": (self.rate_limit.refund_limit, self.rate_limit.refund_window_seconds),
+                "PACT_RATELIMIT_JOB_CREATE": (self.rate_limit.job_create_limit, self.rate_limit.job_create_window_seconds),
+                "PACT_RATELIMIT_READ": (self.rate_limit.read_limit, self.rate_limit.read_window_seconds),
+            }
+            for name, (limit, window) in checks.items():
+                if limit < 1:
+                    problems.append(f"{name}_LIMIT must be at least 1, got {limit}")
+                if window < 1:
+                    problems.append(f"{name}_WINDOW_SECONDS must be at least 1, got {window}")
         return problems
 
 
