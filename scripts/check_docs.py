@@ -48,6 +48,7 @@ REQUIRED_DOCS = [
     "docs/deployment.md",
     "docs/beta-operations.md",
     "docs/beta-launch-checklist.md",
+    "docs/beta-invitation.md",
     "docs/development.md",
     "docs/faq.md",
     "docs/glossary.md",

@@ -25,7 +25,8 @@ Do not invite anyone until every gate is green. Each is checkable.
 | Shared rate limiting | same | `rate_limit.enabled: true`, `shared: true` |
 | Real model | same | `llm.is_mock: false` |
 | Guest sessions | `curl -s -X POST https://pact-flame.vercel.app/api/auth/guest -H 'Content-Type: application/json' -d '{}'` | `201` |
-| Recovery path | provider console | Neon Free PITR history window visible (see §7 and [`beta-operations.md`](beta-operations.md) §6) |
+| Recovery path | provider console | Neon Free PITR history window visible and a throwaway restore exercised (see §6 of [`beta-operations.md`](beta-operations.md)) |
+| Reporting channel | §6 | a private destination is set and reachable |
 
 ## 2. Cohort
 
@@ -51,57 +52,82 @@ Give each tester exactly this:
    step — do not use a real PayPal account.
 4. Do not enter real payment details anywhere.
 
-## 4. Test scenarios
+## 4. Required tester journeys
 
-Run these in order. Each maps to a real capability and a real safeguard.
+Run these in order. Each maps to a real capability and a real safeguard. Journeys 1–10 are
+the required journeys; journey 11 is the isolation check.
 
-| # | Scenario | Steps | Expected result |
+| # | Journey | Steps | Expected result |
 | --- | --- | --- | --- |
-| 1 | Guest session | Open the app | A guest workspace is provisioned; the header shows you are in a private guest workspace |
-| 2 | Job creation | Create a job with a brief and acceptance criteria | Job appears in your workspace, status `draft`/`open` |
-| 3 | Offer + agreement | Let a seller agent offer; accept the offer | An agreed price is recorded; job moves toward escrow |
-| 4 | Payment authorization | Start the escrow run; at the approval step, approve with the **sandbox buyer** credentials the app provides | A PayPal **sandbox** order is created and approved; funds are **held** (authorized), not captured |
-| 5 | Capture / settlement | Let the verifier check the delivery | On a passing verdict the hold is **captured**; the job is `released` with a real sandbox capture id |
-| 6 | Settlement verification | Open the Ledger tab | The hash chain verifies; every step is recorded |
-| 7 | Refund | Refund the captured payment (full or partial) | The refund is recorded with a sandbox refund id; the refunded amount is capped at the captured amount |
-| 8 | Isolation | (Two testers) try to open the other's job by URL | `404` — cross-guest access is refused |
+| 1 | Create a job | Open the app; create a job with a brief and acceptance criteria | A guest workspace is provisioned; the job appears with status `draft`/`open` |
+| 2 | Submit and review offers | Let the seller agents offer | Offers are listed against the job |
+| 3 | Create and review an agreement | Accept an offer | An agreed price is recorded; the job moves toward escrow |
+| 4 | Initiate payment authorization | Start the escrow run | A PayPal **sandbox** order is created; the job stops at `awaiting_approval` |
+| 5 | Complete PayPal Sandbox buyer approval | At the approval step, approve using the **sandbox buyer** credentials the app shows | The authorization is **held** (funds reserved, not captured) |
+| 6 | Capture payment | Let the verifier check the delivery | On a passing verdict the hold is **captured**; the job is `released` with a sandbox capture id |
+| 7 | Verify settlement | Open the Ledger tab | The hash chain verifies; the capture is recorded as a settlement entry |
+| 8 | Execute a refund | Refund the captured payment (full or partial) | A refund is recorded with a sandbox refund id; the amount is capped at the captured amount |
+| 9 | Verify refund completion | Re-open the Ledger / job status | The refund is shown as a completed sandbox refund, not a pending claim |
+| 10 | Review transaction history and status | Review the Ledger and the job status fields | Statuses are consistent; **nothing is shown as succeeded without its verified status** |
+| 11 | Isolation check | With two testers, try to open the other's job by URL | `404` — cross-guest access is refused |
 
 Notes for the facilitator:
 
-- Scenario 4 is the only step that needs an interactive PayPal login; the app surfaces the
-  sandbox buyer credentials at that step. A run that stops at `awaiting_approval` before
-  you approve is **correct** — it is waiting for the buyer.
+- Journey 5 is the only step that needs an interactive PayPal login; the app surfaces the
+  sandbox buyer credentials at that step. A run that stops at `awaiting_approval` before you
+  approve is **correct** — it is waiting for the buyer.
 - If a run's outcome is genuinely unknown, the job goes `unresolved` and is **not** retried
   blindly; resolve it with `reconcile` (see [`beta-operations.md`](beta-operations.md) §5).
 
-## 5. How testers report problems
+## 5. Safety instructions for testers
 
-- **Where:** a single shared channel you control (for example a support email or a chat
-  channel). State it here before launch: `<channel to be set by the operator>`.
-- **What to include:** the job id (if any), what you did, what you expected, what happened,
-  a screenshot, and the approximate time (UTC).
-- **What never to include:** the sandbox buyer password in a public place, or anything that
-  looks like a real credential.
-- Acknowledge every report. If it is a money-path issue (authorization, capture, refund,
-  unresolved), treat it as an incident (§8).
+Give these to every tester, in addition to the onboarding script (§3):
 
-## 6. Operational signals to monitor
+- **Never use real payment credentials.** Use only the sandbox buyer account the app shows
+  you. This is PayPal Sandbox; no real money moves.
+- **Never submit actual financial information** — no real card numbers, bank details, or
+  PayPal passwords.
+- **Never assume a transaction succeeded.** A step is done only when its status says so. If
+  a status looks stuck, wrong, or ambiguous, treat it as a problem, not a success.
+- **Report unexpected transaction states immediately** — especially a capture or refund that
+  does not match what you did, or a job stuck in a state you did not expect.
+
+## 6. How testers report problems
+
+- **Where:** a single private channel the operator controls. **No safe channel exists yet** —
+  the repository is public, so a GitHub issue would publish the report, and GitHub Private
+  Vulnerability Reporting is disabled on the repository. See the proposal in §11. Until the
+  operator sets a channel, the destination here is a placeholder:
+  `<channel to be set by the operator>`.
+- **What to include:** what you did, what you expected, what happened, the approximate time
+  (UTC), and the job id if there is one.
+- **What never to submit anywhere public:** the sandbox buyer password, any real credential,
+  real financial information, personal data, or a full transaction/authorization id.
+- **Escalation:** any money-path problem (authorization, capture, refund, `unresolved` state)
+  is escalated to the operator immediately and handled as an incident (§10).
+
+## 7. Operator monitoring
 
 `GET /api/health` is the primary signal (see [`beta-operations.md`](beta-operations.md) §3).
 
-| Signal | Watch for |
+| Area | What to watch |
 | --- | --- |
-| `status` | anything other than `ok` → settlement is disabled (fail-closed) |
-| `storage.durable` | `false` → stop the beta; the ledger is not guaranteed durable |
-| `rate_limit.shared` | `false` → a multi-instance deployment is under-counting |
-| `paypal.is_live` | `true` → incident; the beta is pointed at live money |
-| `paypal.webhook_verification` | `false` → webhooks cannot be authenticated |
-| `llm.is_mock` | `true` → no model key; the deterministic mock verifier is running |
+| Application health | `status` other than `ok` → settlement is disabled (fail-closed) |
+| Database availability | `storage.durable: false` → stop the beta; the ledger is not guaranteed durable; also watch the Neon dashboard |
+| Failed or unresolved transactions | Any job in `unresolved` → reconcile (§9); a rising count is a pause condition |
+| Capture and refund failures | Any capture/refund that errors or does not match the intent → incident |
+| Webhook processing | `paypal.webhook_verification: false` → webhooks cannot be authenticated; watch for repeated or unprocessed webhooks |
+| Authentication and authorization failures | Spikes in `401`/`403`; any cross-guest access that is not refused |
+| Rate limiting and unexpected errors | `rate_limit.shared: false` → multi-instance under-counting; watch the Vercel deployment for error-rate anomalies |
 
-Also watch the Vercel deployment for error-rate or function-invocation anomalies, and the
-Neon dashboard for the database's own health.
+## 8. Finalize before inviting
 
-## 7. Investigating an unresolved transaction
+- [ ] Every pre-launch gate in §1 is green.
+- [ ] The reporting destination in §6 is set to a real private channel.
+- [ ] The cohort in §2 is named and briefed with §3 and §5.
+- [ ] The operator has the `reconcile` command (§9) and the pause steps (§10) to hand.
+
+## 9. Investigating an unresolved transaction
 
 A job is `unresolved` when a provider call's outcome is genuinely unknown (an ambiguous
 capture or refund). PACT never guesses. Resolution is administrative:
@@ -116,14 +142,19 @@ curl -s -X POST https://<deployment>/api/jobs/<job_id>/reconcile \
 capture. Full procedure and the recovery expectations are in
 [`beta-operations.md`](beta-operations.md) §5–6.
 
-## 8. Pausing the beta
+## 10. Pausing the beta
 
 Pause participation immediately on any of:
 
-- `paypal.is_live: true`, or any evidence of a real-money transaction.
-- `storage.durable: false`, or `status: degraded` that does not recover.
-- A confirmed money-path defect (double capture, incorrect refund, wrong settlement).
-- A security issue: cross-guest data exposure, an authorization bypass, or a CSRF failure.
+- **Duplicate capture** — the same authorization captured more than once.
+- **Incorrect refund amount** — a refund larger than the captured amount, or the wrong amount.
+- **Incorrect ownership or access** — one tester sees another's job, or an authorization bypass.
+- **Unverified settlement presented as successful** — a job shown `released`/settled without
+  a verified capture.
+- **Database integrity problem** — `storage.durable: false`, a failing hash chain, or a
+  `status: degraded` that does not recover.
+- **Any indication that PayPal Live has been enabled** — `paypal.is_live: true`, or any
+  evidence of a real-money transaction.
 
 How to pause:
 
@@ -133,11 +164,34 @@ How to pause:
 3. Record what happened, the affected job ids, and the timeline.
 4. Fix on a branch, verify, and only then resume. Do not patch production directly.
 
-## 9. Launch materials prepared (for review only)
+## 11. Reporting-channel proposal (operator decision required)
+
+No suitable private channel currently exists:
+
+- The repository is **public**, so a GitHub issue would publish tester reports, job ids, and
+  any accidental personal data.
+- GitHub **Private Vulnerability Reporting is disabled** on the repository.
+- [`SECURITY.md`](../SECURITY.md) routes security issues to the maintainer's GitHub profile
+  email, which is fine for a coordinated security disclosure but is not a lightweight channel
+  for everyday beta feedback.
+
+Smallest practical options (the operator picks one; nothing is created here):
+
+1. **Enable GitHub Private Vulnerability Reporting** (repository Settings → Security →
+   Private vulnerability reporting). Free, private, already tied to the repo.
+2. **A private channel the operator already runs** (a private chat, forum, or DM). Simplest,
+   and keeps reports off GitHub entirely. Set the destination in §6.
+3. **A dedicated private inbox** for beta feedback, separate from the security address.
+
+**Recommendation:** option 2 for day-to-day feedback, plus option 1 for anything that looks
+like a security issue. The operator must set the destination in §6 before inviting testers.
+
+## 12. Launch materials prepared (for review only)
 
 - This checklist.
 - [`beta-operations.md`](beta-operations.md) — runbook.
 - [`deployment.md`](deployment.md) — deploy/rollback and environment.
 - [`api/README.md`](api/README.md) — the API a tester or integrator may call.
+- The tester invitation package — see [`beta-invitation.md`](beta-invitation.md).
 
 **Nothing here has been sent to any tester. No public access setting has been changed.**
