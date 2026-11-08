@@ -73,7 +73,7 @@ Mention prizes, and it is a strong fit for two in particular:
   seller agents bid, a buyer agent negotiates, an independent verifier agent decides, and
   the payment moves only on that decision.
 - **Best Use of AG Grid** (sponsor, $5,000 / $2,000 / $1,000) — the settlement ledger is a
-  real AG Grid (`ag-grid-community` + `ag-grid-react` v33, Quartz theme) rendering
+  real AG Grid (`ag-grid-community` + `ag-grid-react` v36, Quartz theme) rendering
   sortable, resizable audit rows with live hash-chain status.
 
 ---

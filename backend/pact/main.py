@@ -97,6 +97,70 @@ class LimitRequestBodyMiddleware:
         await self.app(scope, limited_receive, send)
 
 
+#: Hardening headers attached to every response. These are the ones that are safe
+#: for both the JSON API and the SPA shell:
+#:
+#: * ``X-Content-Type-Options`` stops a browser from re-interpreting a JSON or
+#:   error body as HTML/script (MIME confusion).
+#: * ``X-Frame-Options`` and the ``frame-ancestors`` CSP directive together stop
+#:   the app being framed, which would otherwise let a third-party page overlay a
+#:   click target over the guest's refund/approve controls.
+#: * ``Referrer-Policy`` keeps the guest's full URL (which can carry a job id) out
+#:   of the ``Referer`` sent to PayPal on the approval redirect.
+#: * ``Permissions-Policy`` turns off browser capabilities the product never uses.
+#: * ``Cross-Origin-Opener-Policy`` isolates the document from cross-origin opener
+#:   access.
+#:
+#: This is deliberately *not* a script/style CSP: the Vite bundle relies on inline
+#: styles, so a ``script-src``/``style-src`` policy here would break the app. The
+#: directives chosen harden framing and capability use without constraining the
+#: bundle. HSTS is not set here — the Vercel edge already sends it, and the app must
+#: not force it on a plain-HTTP local run. See docs/security.md.
+_SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+    (
+        b"content-security-policy",
+        b"frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    ),
+    (
+        b"permissions-policy",
+        b"camera=(), microphone=(), geolocation=()",
+    ),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"x-permitted-cross-domain-policies", b"none"),
+)
+
+
+class SecurityHeadersMiddleware:
+    """Attach the hardening headers to every response, without overriding one.
+
+    A header already set further down the stack (for example by a future route that
+    needs a different policy) is left untouched, so this cannot silently clobber a
+    more specific decision.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                present = {name.lower() for name, _ in headers}
+                for name, value in _SECURITY_HEADERS:
+                    if name not in present:
+                        headers.append((name, value))
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 # Middleware runs in reverse order of registration: the last added is outermost.
 # Registering the size cap first makes CORS the outer layer, so a 413 (or any
 # rejection) still carries CORS headers and a browser can read the reason.
@@ -114,6 +178,10 @@ app.add_middleware(
     # requests never preflight, so this widens nothing for the production app.
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
+
+# Added last so it is the outermost layer: every response — including a CORS
+# preflight rejection or a 413 from the size cap — carries the hardening headers.
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(public_router)
 app.include_router(router)

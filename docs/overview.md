@@ -104,7 +104,8 @@ Implemented and verified (see [`implementation-status.md`](implementation-status
 - **Verification is heuristic**, not a formal proof of a deliverable.
 - **Customer self-service accounts and transactional email are implemented but
   disabled by default** (they need a verified email sending domain).
-- **Frontend bundle is a single large chunk** (no code-splitting yet).
+- **The frontend is code-split**: the initial bundle is ~190 kB (gzip ~59 kB); the
+  AG Grid ledger is a lazily-loaded ~1.26 MB chunk fetched only on the Ledger tab.
 
 ## Future direction (clearly separated from what is implemented)
 

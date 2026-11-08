@@ -23,7 +23,7 @@ import Composer from './components/Composer'
 import Negotiation from './components/Negotiation'
 import PaymentStatus from './components/PaymentStatus'
 import Verification, { EscrowRecord } from './components/Verification'
-import Ledger from './components/Ledger'
+import LedgerPanel from './components/LedgerPanel'
 import Reputation from './components/Reputation'
 import Welcome from './components/Welcome'
 
@@ -375,7 +375,7 @@ export default function App() {
                     {tab === 'negotiation' && <Negotiation job={viewJob} />}
                     {tab === 'verification' && <Verification job={viewJob} />}
                     {tab === 'ledger' && (
-                      <Ledger job={viewJob} entries={viewJob.ledger} chainValid={chainValid} />
+                      <LedgerPanel job={viewJob} entries={viewJob.ledger} chainValid={chainValid} />
                     )}
                   </div>
                 </div>

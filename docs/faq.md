@@ -186,7 +186,8 @@ the real path.
 - Verification is heuristic (a model plus deterministic checks), not a formal proof.
 - Customer self-service accounts and transactional email are implemented but disabled
   by default (they need a verified email sending domain).
-- The frontend bundle is a single large chunk (no code-splitting yet).
+- The frontend is code-split: the initial bundle is ~190 kB; the AG Grid ledger is a
+  lazily-loaded ~1.26 MB chunk fetched only on the Ledger tab.
 
 See [`implementation-status.md`](implementation-status.md) for the full, honest
 inventory.

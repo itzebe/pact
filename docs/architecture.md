@@ -94,6 +94,12 @@ hashing.
 - **Request body cap** (`LimitRequestBodyMiddleware`): counts real bytes on the ASGI
   `receive` channel so a chunked body cannot bypass the cap (a `Content-Length`
   check alone is not enough). A body over 64 KiB is rejected with `413`.
+- **Response hardening headers** (`SecurityHeadersMiddleware`): the outermost layer
+  appends `X-Content-Type-Options`, `X-Frame-Options`, a framing/embedding-only
+  `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy`,
+  `Cross-Origin-Opener-Policy` and `X-Permitted-Cross-Domain-Policies` to every
+  response, including errors. The statically-served SPA document gets the same set
+  from `vercel.json`. See [ADR 0008](architecture-decisions/0008-application-level-security-headers.md).
 - **CORS**: exact origins only, with credentials, so a shared parent domain cannot
   read another tenant's settlement.
 - **Routers**: `public_router` (liveness + webhook), `router` (everything that reads

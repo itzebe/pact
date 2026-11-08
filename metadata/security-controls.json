@@ -143,6 +143,14 @@
       "threats": ["memory exhaustion", "validation bypass"]
     },
     {
+      "id": "response_hardening_headers",
+      "category": "data-protection",
+      "control": "Every response carries X-Content-Type-Options: nosniff, X-Frame-Options: DENY, a framing/embedding-only Content-Security-Policy (frame-ancestors 'none'; object-src 'none'; base-uri 'self'), Referrer-Policy: strict-origin-when-cross-origin, Permissions-Policy, Cross-Origin-Opener-Policy: same-origin, and X-Permitted-Cross-Domain-Policies: none. An outermost ASGI middleware attaches them so error responses carry them too; the SPA document gets the same set from vercel.json; a header set by a route is never overwritten.",
+      "source": ["backend/pact/main.py", "vercel.json"],
+      "tests": ["backend/tests/test_security.py"],
+      "threats": ["clickjacking the guest's approve/refund controls", "MIME confusion on JSON/error bodies", "job id leaked in the PayPal Referer"]
+    },
+    {
       "id": "host_allowlist",
       "category": "input-validation",
       "control": "PACT_PUBLIC_URL wins for return URLs; otherwise only an allowlisted host is used, so a forged Host cannot redirect the buyer.",

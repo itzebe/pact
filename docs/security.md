@@ -160,6 +160,34 @@ scoping, seller scoping, buyer-cannot-reconcile, body `buyer_id` ignored).
 *Tests:* `tests/test_security.py` (oversized body, oversized chunked body, too many
 criteria, non-finite budget).
 
+### Response hardening headers
+
+- Every HTTP response carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none';
+  object-src 'none'; base-uri 'self'`, `Referrer-Policy:
+  strict-origin-when-cross-origin`, `Permissions-Policy` (camera, microphone and
+  geolocation disabled), `Cross-Origin-Opener-Policy: same-origin`, and
+  `X-Permitted-Cross-Domain-Policies: none`.
+- They are attached by an **outermost ASGI middleware**
+  (`SecurityHeadersMiddleware`), so an error response (401, 404, 413) carries them
+  exactly as a 200 does — a browser only applies a header on the response it
+  actually receives.
+- The CSP is deliberately limited to framing/embedding directives. It is **not** a
+  `script-src`/`style-src` policy: the Vite bundle relies on inline styles, so a
+  `default-src` policy here would break the app. `frame-ancestors`/`X-Frame-Options`
+  stop the guest's approve/refund controls being overlaid in a third-party frame;
+  `Referrer-Policy` keeps the job id out of the `Referer` sent to PayPal on the
+  approval redirect.
+- On the Vercel deployment the SPA document is served statically (not by the Python
+  function), so the same headers are set for non-`/api` paths in `vercel.json`. HSTS
+  is already sent by the Vercel edge on every response and is not set here.
+- A header a route set itself is never overwritten — the middleware only adds
+  missing ones.
+
+*Source:* `backend/pact/main.py` (`SecurityHeadersMiddleware`), `vercel.json`.
+*Tests:* `tests/test_security.py` (headers on 200/401/404, CSP scope pinned, a
+downstream header preserved).
+
 ### Fail-closed behaviour
 
 - Missing auth secret → `503` on protected routes; production refuses to start.
@@ -270,6 +298,7 @@ deployment reads `environment: "sandbox"`, `is_live: false`, `mode: "sandbox"` a
 | 17 | Unbounded resource use | `run` concurrency | Bounded semaphore; run deadline; `429`/`504` | `tests/test_security.py` (excess runs refused, overrun abandoned) |
 | 18 | Non-durable ledger in production | Missing `DATABASE_URL` | Production refuses to start without a database | `tests/test_security.py`, `test_deployment_safety.py` |
 | 19 | Provider rate-limit exhaustion / repeated provider calls | Money routes | Per-identity fixed window (`429`); shared counter; fails closed | `tests/test_rate_limit.py`, `test_rate_limit_postgres.py` |
+| 20 | Clickjacking the guest's approve/refund controls; MIME confusion on error bodies; job id leaked in the PayPal `Referer` | Any response; approval redirect | Hardening headers (`X-Frame-Options`, `frame-ancestors`, `nosniff`, `Referrer-Policy`) on every response | `tests/test_security.py` (hardening headers on 200/401/404) |
 
 ## Security testing
 

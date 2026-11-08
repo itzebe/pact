@@ -130,7 +130,7 @@ npm test             # Node's built-in runner
 npm run build        # production bundle
 ```
 
-Expected: **43 passed** and a successful build.
+Expected: **46 passed** and a successful build.
 
 ### Lint
 

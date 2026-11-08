@@ -6,8 +6,73 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #30**
-(`f1e146b`, 2026-11-07).
+the `master` branch. The latest merge on `master` is **PR #32**
+(`530ced6`, 2026-11-08).
+
+## Unreleased — beta-readiness hardening and documentation corrections
+
+### Added — response hardening headers
+
+- Every response now carries `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+  DENY`, a framing/embedding-only `Content-Security-Policy` (`frame-ancestors
+  'none'; object-src 'none'; base-uri 'self'`), `Referrer-Policy:
+  strict-origin-when-cross-origin`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`
+  and `X-Permitted-Cross-Domain-Policies`. An outermost ASGI middleware
+  (`SecurityHeadersMiddleware`) attaches them so error responses carry them too; the
+  statically-served SPA document gets the same set from `vercel.json` (HSTS is
+  already sent by the Vercel edge).
+  Closes clickjacking of the guest's approve/refund controls, MIME confusion on
+  JSON/error bodies, and the job id leaking in the PayPal `Referer`. See
+  `docs/architecture-decisions/0008-application-level-security-headers.md` and
+  `tests/test_security.py`.
+
+### Fixed — documentation corrected to the shipped state
+
+- Corrected the stale "latest merge" facts in `CHANGELOG.md`, `docs/evidence/README.md`
+  and `metadata/` (PR #32 / `530ced6`; production verified live at that commit,
+  including `rate_limit.scope: postgres`). Added the missing PR #31 and PR #32
+  changelog entries.
+- Recorded that the ledger-grid accessibility limitation was resolved by the AG Grid
+  33 → 36 upgrade, and updated the AG Grid version references and the frontend test
+  counts (46) and backend counts (512 / 609 / 615) to the freshly measured values.
+- Recorded the frontend code-splitting as shipped (initial bundle ~190 kB; AG Grid a
+  lazy ~1.26 MB chunk) instead of "planned". See
+  `docs/architecture-decisions/0009-code-split-ledger-grid.md`.
+
+## 2026-11-08 — PR #32: rate limit the money-bearing routes per identity
+
+### Added — per-identity fixed-window rate limiting on the money routes
+
+- Every route that can authorize, capture, void or refund a payment was
+  authenticated and object-authorized, but nothing bounded how *often* one caller
+  could reach it. A fixed-window limiter (`backend/pact/core/rate_limit.py`) now
+  covers job creation, `run`, `approve`, `cancel`, `refund`, `reconcile` and the
+  admin provider-order read. Exceeding it is a `429` with `Retry-After` and
+  `X-RateLimit-*` headers.
+- The identity is the signed token subject for a registered account, or the client
+  address for a guest/anonymous caller. A **guest is keyed on its address, not its
+  subject**, so minting fresh sessions from one address cannot reset the budget —
+  matching the existing per-address guest-session cap.
+- The counter is shared through PostgreSQL when a database is configured, so the
+  limit is not spent once per instance; `GET /api/health` reports which
+  (`rate_limit.scope`). A configured-but-unreachable store **refuses** rather than
+  serving unbounded. Production refuses to start with the guard disabled.
+- The shared counter is **serialised per identity**: `check` takes a
+  transaction-scoped advisory lock on `(scope, key)` before counting, so two
+  instances cannot both read an under-limit count and both record. This closed a
+  race CI caught (an 8-way race on a limit of 5 allowed all 8).
+
+*Tests:* `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py` (real
+PostgreSQL 17), and production-refusal cases in `tests/test_deployment_safety.py`.
+*Docs:* `docs/security.md`, `metadata/security-controls.json` (control
+`money_route_rate_limiting`).
+
+## 2026-11-08 — PR #31: record the PR #30 release and correct stale release facts
+
+### Changed — documentation
+
+- Recorded the PR #30 release in the changelog and evidence index and corrected
+  stale release facts across the docs and metadata.
 
 ## 2026-11-07 — PR #30: health reports the resolved PayPal environment (`is_live`)
 

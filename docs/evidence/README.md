@@ -29,14 +29,16 @@ The machine-readable version is [`metadata/evidence.json`](../../metadata/eviden
 | 2026-11-07 | Fix psycopg3 prepared-statement race | PR #28 |
 | 2026-11-07 | Wire `PACT_PG_*` pool settings | PR #29 |
 | 2026-11-07 | Health reports `is_live`; fail closed on an unrecognised `PAYPAL_ENVIRONMENT` | PR #30 (`f1e146b`) |
+| 2026-11-08 | Record the PR #30 release; correct stale release facts | PR #31 (`a9aabf6`) |
+| 2026-11-08 | Rate limit the money-bearing routes per identity | PR #32 (`530ced6`) |
 
-All 30 pull requests are merged into `master`; there are no open pull requests.
+All 32 pull requests are merged into `master`; there are no open pull requests.
 Verified via the GitHub API at documentation time.
 
 ## Release history
 
 PACT has **no tagged releases**. The `master` branch is the release. The latest
-merged change on `master` is PR #30 (`f1e146b`, 2026-11-07), deployed to production
+merged change on `master` is PR #32 (`530ced6`, 2026-11-08), deployed to production
 at the same commit. See [`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
 
 ## Deployment references
@@ -47,14 +49,15 @@ at the same commit. See [`CHANGELOG.md`](../../CHANGELOG.md) for the change hist
 - **Database:** PostgreSQL (Neon-compatible)
 - **Payments:** PayPal Sandbox
 
-Live health verified on 2026-11-07 (deployed commit `f1e146b`):
+Live health verified on 2026-11-08 (deployed commit `530ced6`):
 
 ```json
 {
   "status": "ok",
-  "paypal": { "configured": true, "environment": "sandbox", "is_live": false, "mode": "sandbox", "settlement_is_real": true, "webhook_verification": true, "sandbox_only": false },
+  "paypal": { "configured": true, "environment": "sandbox", "is_live": false, "mode": "sandbox", "settlement_is_real": true, "webhook_verification": true, "sandbox_only": true },
   "llm": { "configured": true, "is_mock": false, "model": "openai/gpt-oss-20b @ https://api.groq.com/openai/v1" },
-  "storage": { "backend": "postgres", "durable": true }
+  "storage": { "backend": "postgres", "durable": true },
+  "rate_limit": { "enabled": true, "scope": "postgres", "shared": true }
 }
 ```
 
@@ -65,10 +68,10 @@ Commands run on 2026-11-08 in the workspace container (Python 3.13.15, Node
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend (filesystem) | `python -m pytest tests/ -q` | **509 passed, 104 skipped** |
-| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **606 passed, 7 skipped** |
-| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **612 passed, 1 skipped** |
-| Frontend unit | `npm test` | **43 passed** |
+| Backend (filesystem) | `python -m pytest tests/ -q` | **512 passed, 104 skipped** |
+| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **609 passed, 7 skipped** |
+| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **615 passed, 1 skipped** |
+| Frontend unit | `npm test` | **46 passed** |
 | Frontend build | `npm run build` | success |
 | Lint | `python -m pyflakes pact/ scripts/` | clean |
 

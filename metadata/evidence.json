@@ -1,7 +1,7 @@
 {
   "schema_note": "Verification evidence for PACT: what was run, where, and with what result. Counts are real results from commands executed while writing this documentation (2026-11-08). A skip is not a pass; skipped tests and their reason are recorded.",
   "verification_date": "2026-11-08",
-  "verified_commit": "fde7abc",
+  "verified_commit": "530ced6 (master) + the uncommitted beta-readiness documentation changes recorded here",
   "environment": {
     "python": "3.13.15 (local verification container; CI runs 3.11)",
     "node": "24.22.1",
@@ -14,27 +14,27 @@
       "name": "backend_filesystem",
       "command": "cd backend && python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true PACT_AUTH_SECRET=<test>",
-      "result": "509 passed, 104 skipped",
+      "result": "512 passed, 104 skipped",
       "note": "The 104 skips are the PostgreSQL integration tests plus the pooled-endpoint tests, which skip themselves when no database (or no PGBOUNCER_URL) is reachable."
     },
     {
       "name": "backend_postgres",
       "command": "cd backend && DATABASE_URL=postgresql://... python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17",
-      "result": "606 passed, 7 skipped",
+      "result": "609 passed, 7 skipped",
       "note": "The 7 skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides; they were not run in this local verification."
     },
     {
       "name": "frontend_unit",
       "command": "cd frontend && npm test",
-      "result": "43 passed",
+      "result": "46 passed",
       "runner": "node --test"
     },
     {
       "name": "frontend_build",
       "command": "cd frontend && npm run build",
       "result": "success",
-      "note": "39 modules transformed; single ~1.1 MB chunk (gzip ~325 kB)."
+      "note": "43 modules transformed; initial chunk 190.33 kB (gzip 59.49 kB) plus a lazily-loaded Ledger chunk of 1,259.56 kB (gzip 352.44 kB). The initial bundle was ~1.14 MB before the ledger grid was code-split."
     },
     {
       "name": "lint",
@@ -80,8 +80,8 @@
   "production_metadata": {
     "repo": "https://github.com/itzebe/pact",
     "default_branch": "master",
-    "latest_master_commit": "a9aabf6",
-    "merged_pull_requests": 31,
+    "latest_master_commit": "530ced6",
+    "merged_pull_requests": 32,
     "open_pull_requests": 0,
     "github_topics_before": [],
     "license": "MIT"

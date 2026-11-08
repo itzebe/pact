@@ -839,3 +839,67 @@ def test_a_healthy_shared_store_still_admits_the_first_redemption(client, memory
     ticket = client.post(f"/api/jobs/{job_id}/stream-ticket", headers=BUYER).json()["ticket"]
     assert client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}").status_code == 200
 
+
+# ------------------------------------------------------------- response hardening
+def test_every_response_carries_the_hardening_headers(client):
+    """The hardening headers must ride on success and error responses alike.
+
+    A browser only applies them if they are present on the response it actually
+    receives, so a 401 or a 404 must carry them as much as a 200 does. They are
+    attached by an outermost middleware for exactly that reason.
+    """
+    expected = {
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "cross-origin-opener-policy": "same-origin",
+        "x-permitted-cross-domain-policies": "none",
+    }
+    for response in (
+        client.get("/api/health"),
+        client.get("/api/jobs"),  # 401: no credential
+        client.get("/api/jobs/job_does_not_exist", headers=BUYER),  # 404
+    ):
+        for header, value in expected.items():
+            assert response.headers.get(header) == value, (response.status_code, header)
+
+
+def test_the_csp_forbids_framing_but_does_not_constrain_the_bundle(client):
+    """The CSP must block framing and plugin/embedding vectors.
+
+    It is deliberately not a script/style policy: the Vite bundle uses inline
+    styles, so a ``script-src``/``style-src`` directive would break the app. This
+    pins the conservative scope so a later edit cannot quietly add a restrictive
+    ``default-src`` that breaks the SPA.
+    """
+    csp = client.get("/api/health").headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in csp
+    assert "object-src 'none'" in csp
+    assert "base-uri 'self'" in csp
+    assert "default-src" not in csp
+    assert "script-src" not in csp
+    assert "style-src" not in csp
+
+
+def test_a_header_already_set_downstream_is_not_overwritten():
+    """The middleware must add headers, never clobber one a route chose itself."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from pact.main import SecurityHeadersMiddleware
+
+    inner = FastAPI()
+
+    @inner.get("/custom")
+    def custom() -> dict[str, str]:
+        from starlette.responses import JSONResponse
+
+        return JSONResponse({"ok": "true"}, headers={"X-Frame-Options": "SAMEORIGIN"})
+
+    app = SecurityHeadersMiddleware(inner)
+    response = TestClient(app).get("/custom")
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
+    # A header the route did not set is still added.
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+

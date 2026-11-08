@@ -14,8 +14,8 @@
     "license": "MIT",
     "language": "Python",
     "visibility": "public",
-    "latest_known_master_commit": "a9aabf6",
-    "latest_known_master_pr": 31,
+    "latest_known_master_commit": "530ced6",
+    "latest_known_master_pr": 32,
     "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time."
   },
   "production": {
@@ -52,7 +52,7 @@
     "knowledge_map": "docs/knowledge-map.md",
     "llm_discovery": ["llms.txt", "llms-full.txt"],
     "agent_instructions": "AGENTS.md",
-    "last_verified_commit": "a9aabf6",
+    "last_verified_commit": "530ced6",
     "last_verified_date": "2026-11-08"
   },
   "status_vocabulary": [
