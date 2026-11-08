@@ -201,3 +201,107 @@ def test_the_health_surface_publishes_only_booleans_not_credentials():
         assert isinstance(value, (bool, str)), key
     assert isinstance(paypal["configured"], bool)
     assert isinstance(paypal["webhook_verification"], bool)
+
+
+# --------------------------------------------------- the health environment fields
+
+
+def test_the_health_surface_reports_whether_it_resolves_to_a_live_host():
+    """``paypal.is_live`` is the authoritative environment indicator.
+
+    ``sandbox_only`` is only the guard switch and is off by default, so it reads
+    ``false`` on a perfectly safe sandbox deployment. A reader must be able to tell
+    "is this process pointed at live PayPal?" from the health body alone, without
+    inferring it from the guard flag.
+    """
+    from fastapi.testclient import TestClient
+
+    from pact.main import app
+
+    paypal = TestClient(app).get("/api/health").json()["paypal"]
+    assert "is_live" in paypal
+    assert isinstance(paypal["is_live"], bool)
+
+
+def test_is_live_tracks_the_configured_environment():
+    sandbox = _settings(PAYPAL_ENVIRONMENT="sandbox", PAYPAL_BASE_URL=None)
+    assert sandbox.paypal.is_live is False
+    live = _settings(PAYPAL_ENVIRONMENT="live", PAYPAL_BASE_URL=None)
+    assert live.paypal.is_live is True
+
+
+def test_sandbox_only_false_does_not_mean_live_money():
+    """The exact production observation, pinned.
+
+    Production reported ``environment: sandbox`` and ``sandbox_only: false`` at the
+    same time. That is a safe sandbox deployment whose guard switch is simply unset;
+    it is not evidence of live money. ``is_live`` is what disambiguates it.
+    """
+    s = _settings(
+        PAYPAL_ENVIRONMENT="sandbox",
+        PAYPAL_BASE_URL=None,
+        PACT_PAYPAL_SANDBOX_ONLY=None,
+        PACT_ENV="production",
+    )
+    assert s.paypal.sandbox_only is False
+    assert s.paypal.is_live is False
+
+
+# --------------------------------------- an unknown environment must fail closed
+
+
+def test_an_unrecognised_environment_is_not_presented_as_sandbox():
+    """The ambiguity the sandbox-only design exists to prevent.
+
+    ``is_live`` is what the health surface and the guard switch on. If it were
+    ``environment == "live"``, then ``PAYPAL_ENVIRONMENT=production`` (or any typo)
+    would resolve to the sandbox *host* while being reported as a safe sandbox
+    deployment — an invalid configuration presented as a valid one. It must be
+    classified live instead.
+    """
+    for value in ["production", "prod", "staging", "", "sandboxx", "LIVE "]:
+        s = _settings(PAYPAL_ENVIRONMENT=value, PAYPAL_BASE_URL=None)
+        assert s.paypal.is_live is True, value
+
+
+def test_an_unrecognised_environment_is_refused_at_startup():
+    """A typo must refuse the boot, not silently talk to sandbox while reporting safe."""
+    for value in ["production", "prod", "", "sandboxx"]:
+        s = _settings(
+            PAYPAL_ENVIRONMENT=value,
+            PAYPAL_BASE_URL=None,
+            PACT_ENV="production",
+            PACT_AUTH_SECRET="a-sufficiently-long-random-secret-value",
+            PAYPAL_CLIENT_ID="id",
+            PAYPAL_CLIENT_SECRET="secret",
+            DATABASE_URL="postgresql://u:p@db.internal:5432/pact",
+            PACT_ALLOW_MOCK_PAYPAL="false",
+        )
+        problems = s.validate_runtime()
+        assert any("PAYPAL_ENVIRONMENT" in p for p in problems), (value, problems)
+
+
+def test_the_two_known_environments_are_accepted():
+    """The refusal must not reject the only two values the client can resolve."""
+    for value in ["sandbox", "live"]:
+        s = _settings(
+            PAYPAL_ENVIRONMENT=value,
+            PAYPAL_BASE_URL=None,
+            PACT_ENV="production",
+            PACT_AUTH_SECRET="a-sufficiently-long-random-secret-value",
+            PAYPAL_CLIENT_ID="id",
+            PAYPAL_CLIENT_SECRET="secret",
+            DATABASE_URL="postgresql://u:p@db.internal:5432/pact",
+            PACT_ALLOW_MOCK_PAYPAL="false",
+        )
+        assert not any("PAYPAL_ENVIRONMENT" in p for p in s.validate_runtime()), value
+
+
+def test_a_base_url_override_makes_the_environment_value_irrelevant():
+    """A test/proxy override names the host directly, so the env value need not be known."""
+    s = _settings(
+        PAYPAL_ENVIRONMENT="whatever",
+        PAYPAL_BASE_URL="http://127.0.0.1:9999",
+    )
+    assert not any("PAYPAL_ENVIRONMENT" in p for p in s.validate_runtime())
+    assert s.paypal.is_live is False

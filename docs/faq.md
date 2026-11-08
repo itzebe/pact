@@ -72,6 +72,16 @@ not a custodian and never touches the funds directly.
 (`PACT_PAYPAL_SANDBOX_ONLY`) that can hard-refuse a live host. The live demo moves no
 real money. See [`payment-lifecycle.md`](payment-lifecycle.md).
 
+To confirm the environment from outside, read `GET /api/health`: `paypal.environment`
+is `sandbox`, `paypal.is_live` is `false`, and `paypal.mode` is `sandbox`. Note that
+`paypal.sandbox_only` being `false` is expected — it reports whether the *guard* is
+switched on, not whether the deployment is live; `paypal.is_live` is the indicator
+that answers that question.
+
+`PAYPAL_ENVIRONMENT` must be exactly `sandbox` or `live`. Any other value (a typo such
+as `production`) is refused at startup, and `paypal.is_live` reports `true` for it, so
+a mistyped environment can never be presented as a safe sandbox one.
+
 ## How does capture work?
 
 When verification passes, PACT captures the authorization

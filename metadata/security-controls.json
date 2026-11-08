@@ -121,9 +121,9 @@
     {
       "id": "sandbox_only_guard",
       "category": "payment-integrity",
-      "control": "PACT_PAYPAL_SANDBOX_ONLY refuses a live PayPal host; startup refuses guest sessions against a live host.",
-      "source": ["backend/pact/config.py"],
-      "tests": ["backend/tests/test_security.py", "backend/tests/test_deployment_safety.py"],
+      "control": "PACT_PAYPAL_SANDBOX_ONLY refuses a live PayPal host; startup refuses guest sessions against a live host. PAYPAL_ENVIRONMENT must be exactly sandbox or live: any other value is refused at startup in every environment, and paypal.is_live reports true for it, so an ambiguous configuration cannot be presented as a safe sandbox one. GET /api/health reports the resolved environment as paypal.is_live (true only when the config resolves to PayPal's production host), so the guard switch paypal.sandbox_only (off by default) is not mistaken for the deployment's actual environment.",
+      "source": ["backend/pact/config.py", "backend/pact/api/routes.py"],
+      "tests": ["backend/tests/test_paypal_sandbox_config.py", "backend/tests/test_security.py", "backend/tests/test_deployment_safety.py"],
       "threats": ["accidental real-money movement"]
     },
     {

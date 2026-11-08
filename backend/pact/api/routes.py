@@ -162,6 +162,11 @@ def health() -> dict[str, Any]:
         "paypal": {
             "configured": settings.paypal.configured,
             "environment": settings.paypal.environment,
+            # Whether this process resolves to PayPal's *live* host. This is the
+            # authoritative environment indicator: ``sandbox_only`` below is only
+            # the guard switch (PACT_PAYPAL_SANDBOX_ONLY), which is off by default,
+            # so a reader must not mistake ``sandbox_only: false`` for "live money".
+            "is_live": settings.paypal.is_live,
             "mode": engine.settlement_mode,
             "require_real": settings.require_real_paypal,
             # Whether this process will move real money. False means the mock is

@@ -44,7 +44,7 @@ check, it is marked *(live)*.
 | Bearer auth + roles | `api/auth.py` | Implemented and verified | `tests/test_security.py` |
 | Object-level authorization | `api/routes.py`, `api/auth.py` | Implemented and verified | `tests/test_security.py` |
 | CSRF protection for guests | `api/auth.py`, `core/guests.py` | Implemented and verified | `tests/test_guests.py` |
-| Sandbox-only guard | `config.py` | Implemented and verified | `tests/test_security.py`, `tests/test_deployment_safety.py` |
+| Sandbox-only guard | `config.py` (`PayPalSettings.is_live`, `PAYPAL_ENVIRONMENTS`) | Implemented and verified | `tests/test_security.py`, `tests/test_deployment_safety.py`, `tests/test_paypal_sandbox_config.py` (an unrecognised `PAYPAL_ENVIRONMENT` is classified live and refused at startup) |
 | Fail-closed startup validation | `config.py`, `main.py` | Implemented and verified | `tests/test_security.py`, `tests/test_deployment_safety.py` |
 | Request body cap | `main.py` | Implemented and verified | `tests/test_security.py` |
 | Bounded run concurrency | `core/engine.py`, `api/routes.py` | Implemented and verified | `tests/test_security.py` |
@@ -73,9 +73,9 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **480 passed, 94 skipped**.
-- Backend (PostgreSQL 17): **568 passed, 6 skipped** (the 6 need a separate
-  PgBouncer endpoint). With PgBouncer in transaction mode: **573 passed, 1 skipped**.
+- Backend (filesystem store): **487 passed, 94 skipped**.
+- Backend (PostgreSQL 17): **575 passed, 6 skipped** (the 6 need a separate
+  PgBouncer endpoint). With PgBouncer in transaction mode: **580 passed, 1 skipped**.
 - Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.

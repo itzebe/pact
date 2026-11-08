@@ -66,6 +66,7 @@ Public. Configuration and settlement mode. Exposes no secret.
   "paypal": {
     "configured": true,
     "environment": "sandbox",
+    "is_live": false,
     "mode": "sandbox",
     "require_real": false,
     "settlement_is_real": true,
@@ -81,6 +82,13 @@ Public. Configuration and settlement mode. Exposes no secret.
   "storage": { "backend": "postgres", "durable": true }
 }
 ```
+
+`paypal.is_live` is the authoritative environment indicator: `true` means this process
+resolves to PayPal's production host. `paypal.sandbox_only` is only the guard switch
+(`PACT_PAYPAL_SANDBOX_ONLY`) and is **off by default**, so it reads `false` on a
+perfectly safe sandbox deployment — it is not evidence of live money. `paypal.mode`
+reports the settlement backend actually in use (`sandbox`, `live`, or `mock`), and
+`paypal.settlement_is_real` is `false` when the in-memory mock is in use.
 
 `status` is `degraded` when the configured durable store could not be opened (then
 `storage.settlement_disabled` is `true` and `storage.error` is a fixed
