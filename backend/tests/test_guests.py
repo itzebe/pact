@@ -96,6 +96,21 @@ def _csrf_headers(session: dict) -> dict[str, str]:
     return {"X-CSRF-Token": session["csrf_token"]}
 
 
+def _seed_proven_sellers(client: TestClient) -> None:
+    """Give two sellers a settled history so a competent seller wins the job.
+
+    On a cold reputation ledger every seller scores 0.5, so ``seller_quill`` —
+    the deliberate bad actor that never delivers — is the cheapest and wins on
+    risk-adjusted cost, and every run voids. Recording prior settlements for the
+    two competent sellers makes selection deterministic and routes around the bad
+    actor, which is exactly the reputation mechanism the product relies on.
+    """
+    from pact.api import routes
+
+    routes.engine.reputation.record_settled("seller_atlas", 100.0)
+    routes.engine.reputation.record_settled("seller_nova", 100.0)
+
+
 # --------------------------------------------------------------------- disabled
 
 
@@ -158,12 +173,20 @@ def test_a_guest_can_use_the_product_end_to_end(client):
 
 
 def test_a_guest_can_refund_its_own_settled_payment(client):
+    """The owner can refund a settled capture through the public API.
+
+    Seeded so a competent seller wins and the run reaches ``released`` (see
+    ``_seed_proven_sellers``); the refund then has a capture to return. This is
+    the guest-facing half of the refund authorization the engine tests cover.
+    """
+    _seed_proven_sellers(client)
     session = _new_guest(client)
     job_id = client.post("/api/jobs", json=BODY, headers=_csrf_headers(session)).json()["id"]
     client.post(f"/api/jobs/{job_id}/run", headers=_csrf_headers(session))
     job = client.get(f"/api/jobs/{job_id}").json()
-    if job["escrow"]["state"] != "released":
-        pytest.skip("the deterministic mock did not settle this run")
+    assert job["escrow"]["state"] == "released", (
+        f"seeded selection should reach a released escrow, got {job['escrow']['state']}"
+    )
     refunded = client.post(
         f"/api/jobs/{job_id}/refund", json={"amount": None, "reason": "judge check"},
         headers=_csrf_headers(session),

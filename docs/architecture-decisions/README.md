@@ -13,6 +13,9 @@ and grounded in the code and the project's own history.
 | [0005](0005-exactly-once-webhooks.md) | Process webhooks exactly once in a shared store |
 | [0006](0006-guest-first-zero-friction.md) | Guest-first onboarding as the default public experience |
 | [0007](0007-health-reports-is-live.md) | Report the resolved PayPal environment as `is_live`, not only the guard flag |
+| [0008](0008-application-level-security-headers.md) | Attach hardening headers in the application, not only at the edge |
+| [0009](0009-code-split-ledger-grid.md) | Code-split the ledger grid and keep AG Grid current |
+| [0010](0010-pin-node-env-for-build.md) | Pin `NODE_ENV=production` for the frontend build |
 
 ## Format
 

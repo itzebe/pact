@@ -6,8 +6,121 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #30**
-(`f1e146b`, 2026-11-07).
+the `master` branch. The latest merge on `master` is **PR #32**
+(`530ced6`, 2026-11-08).
+
+## Unreleased — beta-readiness hardening and documentation corrections
+
+### Fixed — the production build could silently ship React's development bundle
+
+- `frontend/vite.config.js` now forces `NODE_ENV=production` for the `build`
+  command. Vite passes the ambient `NODE_ENV` through to esbuild, and React selects
+  its development entry point unless `NODE_ENV` is exactly `production`. A build run
+  where `NODE_ENV=development` is exported (a common shell setting, and a possible
+  CI/Vercel project variable) emitted **411 kB / 116 kB gzip** for the initial chunk
+  instead of **190 kB / 59 kB gzip** — ~2.2x the JavaScript, plus React's
+  development-only warnings and the DevTools hook — with no error and no failing
+  test. The pin makes the artefact identical wherever the build runs. Pinned by
+  `frontend/test/bundle-a11y.test.js`.
+
+### Added — regression coverage for the response-hardening and COOP invariants
+
+- `backend/tests/test_security.py` now proves the `413` body-cap rejection and both
+  CORS preflight answers (listed origin allowed, unlisted origin refused) carry the
+  hardening headers — the outermost middleware must wrap a response produced by an
+  inner middleware, not just one produced by a route.
+- `frontend/test/coop-paypal.test.js` pins the `Cross-Origin-Opener-Policy:
+  same-origin` compatibility invariant: the app has no `window.opener`,
+  `postMessage`, or `window.open` dependency and does not load the PayPal JS SDK, so
+  COOP cannot break the approval flow (a top-level redirect link with
+  `rel="noreferrer"`, with the return read from the `?job=` query). A future popup
+  integration fails this test, which is the signal to revisit COOP.
+
+### Added — response hardening headers
+
+- Every response now carries `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+  DENY`, a framing/embedding-only `Content-Security-Policy` (`frame-ancestors
+  'none'; object-src 'none'; base-uri 'self'`), `Referrer-Policy:
+  strict-origin-when-cross-origin`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`
+  and `X-Permitted-Cross-Domain-Policies`. An outermost ASGI middleware
+  (`SecurityHeadersMiddleware`) attaches them so error responses carry them too; the
+  statically-served SPA document gets the same set from `vercel.json` (HSTS is
+  already sent by the Vercel edge).
+  Closes clickjacking of the guest's approve/refund controls, MIME confusion on
+  JSON/error bodies, and the job id leaking in the PayPal `Referer`. See
+  `docs/architecture-decisions/0008-application-level-security-headers.md` and
+  `tests/test_security.py`.
+
+### Fixed — documentation corrected to the shipped state
+
+- Corrected the stale "latest merge" facts in `CHANGELOG.md`, `docs/evidence/README.md`
+  and `metadata/` (PR #32 / `530ced6`; production verified live at that commit,
+  including `rate_limit.scope: postgres`). Added the missing PR #31 and PR #32
+  changelog entries.
+- Recorded that the ledger-grid accessibility limitation was resolved by the AG Grid
+  33 → 36 upgrade, and updated the AG Grid version references and the frontend test
+  counts (46) and backend counts (512 / 609 / 615) to the freshly measured values.
+- Recorded the frontend code-splitting as shipped (initial bundle ~190 kB; AG Grid a
+  lazy ~1.26 MB chunk) instead of "planned". See
+  `docs/architecture-decisions/0009-code-split-ledger-grid.md`.
+
+### Fixed — an unknown `/api` path was answered with the SPA shell (single-container image)
+
+- In the single-container image the SPA is mounted at `/` and its fallback returned
+  `index.html` for any extension-less path, so a mistyped or unknown `/api/...`
+  route (and the bare `/api`) was served the HTML shell with a `200` instead of a
+  JSON `404`. A client parsing that response as JSON fails confusingly, and the API
+  surface silently claims routes that do not exist. `_SPAStaticFiles` now re-raises
+  any `404` for a path under `/api` so the API answer stays a JSON `404`. The Vercel
+  deployment was already correct (it serves the SPA statically and routes `/api/*`
+  to the function); this aligns the image with it. Pinned by
+  `tests/test_spa_static.py::test_an_unknown_api_path_is_not_swallowed_by_the_spa_mount`.
+
+### Fixed — the guest refund test was dead coverage, not a flake
+
+- `tests/test_guests.py::test_a_guest_can_refund_its_own_settled_payment` skipped
+  deterministically: on a cold reputation ledger every seller scores 0.5, so the
+  deliberate bad actor (`seller_quill`) was always the cheapest, always won, and
+  every run voided — the refund assertion never executed. The test now seeds a
+  settled history for two competent sellers so selection is deterministic and the
+  run reaches `released`, and asserts that state instead of skipping. Backend counts
+  move accordingly: 516 / 613 / 619 passed (filesystem / PostgreSQL / + pooler),
+  with the pooler configuration now skipping nothing.
+
+## 2026-11-08 — PR #32: rate limit the money-bearing routes per identity
+
+### Added — per-identity fixed-window rate limiting on the money routes
+
+- Every route that can authorize, capture, void or refund a payment was
+  authenticated and object-authorized, but nothing bounded how *often* one caller
+  could reach it. A fixed-window limiter (`backend/pact/core/rate_limit.py`) now
+  covers job creation, `run`, `approve`, `cancel`, `refund`, `reconcile` and the
+  admin provider-order read. Exceeding it is a `429` with `Retry-After` and
+  `X-RateLimit-*` headers.
+- The identity is the signed token subject for a registered account, or the client
+  address for a guest/anonymous caller. A **guest is keyed on its address, not its
+  subject**, so minting fresh sessions from one address cannot reset the budget —
+  matching the existing per-address guest-session cap.
+- The counter is shared through PostgreSQL when a database is configured, so the
+  limit is not spent once per instance; `GET /api/health` reports which
+  (`rate_limit.scope`). A configured-but-unreachable store **refuses** rather than
+  serving unbounded. Production refuses to start with the guard disabled.
+- The shared counter is **serialised per identity**: `check` takes a
+  transaction-scoped advisory lock on `(scope, key)` before counting, so two
+  instances cannot both read an under-limit count and both record. This closed a
+  race CI caught (an 8-way race on a limit of 5 allowed all 8).
+
+*Tests:* `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py` (real
+PostgreSQL 17), and production-refusal cases in `tests/test_deployment_safety.py`.
+*Docs:* `docs/security.md`, `metadata/security-controls.json` (control
+`money_route_rate_limiting`).
+
+## 2026-11-08 — PR #31: record the PR #30 release and correct stale release facts
+
+### Changed — documentation
+
+- Recorded the PR #30 release in the changelog and evidence index and corrected
+  stale release facts across the docs and metadata.
 
 ## 2026-11-07 — PR #30: health reports the resolved PayPal environment (`is_live`)
 

@@ -839,3 +839,115 @@ def test_a_healthy_shared_store_still_admits_the_first_redemption(client, memory
     ticket = client.post(f"/api/jobs/{job_id}/stream-ticket", headers=BUYER).json()["ticket"]
     assert client.get(f"/api/jobs/{job_id}/stream?ticket={ticket}").status_code == 200
 
+
+# ------------------------------------------------------------- response hardening
+def test_every_response_carries_the_hardening_headers(client):
+    """The hardening headers must ride on success and error responses alike.
+
+    A browser only applies them if they are present on the response it actually
+    receives, so a 401 or a 404 must carry them as much as a 200 does. They are
+    attached by an outermost middleware for exactly that reason.
+    """
+    expected = {
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "cross-origin-opener-policy": "same-origin",
+        "x-permitted-cross-domain-policies": "none",
+    }
+    for response in (
+        client.get("/api/health"),
+        client.get("/api/jobs"),  # 401: no credential
+        client.get("/api/jobs/job_does_not_exist", headers=BUYER),  # 404
+    ):
+        for header, value in expected.items():
+            assert response.headers.get(header) == value, (response.status_code, header)
+
+
+def test_the_csp_forbids_framing_but_does_not_constrain_the_bundle(client):
+    """The CSP must block framing and plugin/embedding vectors.
+
+    It is deliberately not a script/style policy: the Vite bundle uses inline
+    styles, so a ``script-src``/``style-src`` directive would break the app. This
+    pins the conservative scope so a later edit cannot quietly add a restrictive
+    ``default-src`` that breaks the SPA.
+    """
+    csp = client.get("/api/health").headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in csp
+    assert "object-src 'none'" in csp
+    assert "base-uri 'self'" in csp
+    assert "default-src" not in csp
+    assert "script-src" not in csp
+    assert "style-src" not in csp
+
+
+def test_a_header_already_set_downstream_is_not_overwritten():
+    """The middleware must add headers, never clobber one a route chose itself."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from pact.main import SecurityHeadersMiddleware
+
+    inner = FastAPI()
+
+    @inner.get("/custom")
+    def custom() -> dict[str, str]:
+        from starlette.responses import JSONResponse
+
+        return JSONResponse({"ok": "true"}, headers={"X-Frame-Options": "SAMEORIGIN"})
+
+    app = SecurityHeadersMiddleware(inner)
+    response = TestClient(app).get("/custom")
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
+    # A header the route did not set is still added.
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_the_413_body_cap_response_carries_the_hardening_headers(client):
+    """The size cap rejects before the route runs; its response must still be hardened.
+
+    ``SecurityHeadersMiddleware`` is the outermost layer precisely so a rejection
+    raised by an inner middleware (the body cap, or CORS) is wrapped too. A 413 is
+    a response a browser receives, so it needs the same headers as a 200.
+    """
+    from pact.main import MAX_REQUEST_BYTES
+
+    oversized = b"x" * (MAX_REQUEST_BYTES + 1024)
+    response = client.post(
+        "/api/jobs",
+        content=oversized,
+        headers={**BUYER, "content-type": "application/json"},
+    )
+    assert response.status_code == 413, response.text
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+def test_a_cors_preflight_is_answered_only_for_an_exact_listed_origin(client):
+    """The preflight policy is an exact-origin allowlist, and both answers are hardened.
+
+    ``allow_credentials=True`` makes a too-loose origin match a direct path to
+    reading and driving another user's settlement, so an unlisted origin must be
+    refused rather than echoed. The hardening headers must ride on the preflight
+    response either way.
+    """
+    allowed = client.options(
+        "/api/jobs",
+        headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"},
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert allowed.headers["access-control-allow-credentials"] == "true"
+    assert allowed.headers["x-content-type-options"] == "nosniff"
+    assert allowed.headers["x-frame-options"] == "DENY"
+
+    refused = client.options(
+        "/api/jobs",
+        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert refused.status_code == 400
+    assert "access-control-allow-origin" not in refused.headers
+    assert refused.headers["x-content-type-options"] == "nosniff"
+
+

@@ -166,7 +166,7 @@ matters more than making the happy path look smooth.
 | **PayPal Payments v2 (refunds)** | `POST /v2/payments/captures/{id}/refund`, full or partial, capped and deduplicated. |
 | **PayPal Sandbox** | The environment everything runs against, so the money movement is real API traffic without real money. |
 | **AI model (OpenAI-compatible)** | Three agent roles — seller quoting, buyer countering, independent verification. Deployed demo runs on Groq `openai/gpt-oss-20b`. |
-| **AG Grid** | The settlement ledger grid (`ag-grid-community` + `ag-grid-react` v33, Quartz theme): sortable, resizable audit rows with hash-chain status. |
+| **AG Grid** | The settlement ledger grid (`ag-grid-community` + `ag-grid-react` v36, Quartz theme): sortable, resizable audit rows with hash-chain status. |
 | **Docker** | Single-container build serving API + built UI, so a judge can run the whole project with one command. |
 
 ---

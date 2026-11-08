@@ -175,7 +175,31 @@
       "description": "React/Vite/Tailwind UI: composer, negotiation, verification, ledger, payment panel, reputation.",
       "implementation": ["frontend/src/"],
       "status": "implemented_verified",
-      "evidence": ["frontend/test/*.js (43 tests)", "live: production root returns 200"]
+      "evidence": ["frontend/test/*.js (52 tests)", "live: production root returns 200"]
+    },
+    {
+      "id": "frontend_code_splitting",
+      "name": "Frontend code-splitting",
+      "description": "AG Grid is loaded only on the Ledger tab through a dynamic import (frontend/src/components/LedgerPanel.jsx), so the initial bundle is ~190 kB instead of ~1.14 MB; the grid is its own ~1.26 MB chunk fetched on demand. Ships on PR #33; production at 530ced6 still serves the pre-split ~1.14 MB initial chunk.",
+      "implementation": ["frontend/src/components/LedgerPanel.jsx", "frontend/src/App.jsx"],
+      "status": "implemented_verified",
+      "evidence": ["frontend/test/bundle-a11y.test.js", "live: ledger tab loads the lazy chunk and renders every row"]
+    },
+    {
+      "id": "deterministic_production_build",
+      "name": "Deterministic production build",
+      "description": "frontend/vite.config.js pins NODE_ENV=production for the build command, so an ambient NODE_ENV=development can no longer silently ship React's development bundle (411 kB vs 190 kB initial chunk).",
+      "implementation": ["frontend/vite.config.js"],
+      "status": "implemented_verified",
+      "evidence": ["frontend/test/bundle-a11y.test.js", "docs/architecture-decisions/0010-pin-node-env-for-build.md"]
+    },
+    {
+      "id": "response_hardening_headers",
+      "name": "Response hardening headers",
+      "description": "Every response carries X-Content-Type-Options: nosniff, X-Frame-Options: DENY, a framing/embedding-only CSP (frame-ancestors 'none'; object-src 'none'; base-uri 'self'), Referrer-Policy, Permissions-Policy, Cross-Origin-Opener-Policy and X-Permitted-Cross-Domain-Policies. An outermost middleware attaches them to error responses too; the SPA document gets the same set from vercel.json.",
+      "implementation": ["backend/pact/main.py", "vercel.json"],
+      "status": "implemented_verified",
+      "evidence": ["backend/tests/test_security.py", "live: local and production responses carry the headers"]
     },
     {
       "id": "customer_accounts",
@@ -215,7 +239,6 @@
     }
   ],
   "not_implemented": [
-    { "name": "Frontend code-splitting", "status": "planned" },
     { "name": "Real-money deployment path with operational controls", "status": "planned" },
     { "name": "Pluggable verifiers", "status": "planned" },
     { "name": "Additional settlement rails behind the escrow interface", "status": "planned" },

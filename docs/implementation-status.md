@@ -46,11 +46,14 @@ check, it is marked *(live)*.
 | CSRF protection for guests | `api/auth.py`, `core/guests.py` | Implemented and verified | `tests/test_guests.py` |
 | Sandbox-only guard | `config.py` (`PayPalSettings.is_live`, `PAYPAL_ENVIRONMENTS`) | Implemented and verified | `tests/test_security.py`, `tests/test_deployment_safety.py`, `tests/test_paypal_sandbox_config.py` (an unrecognised `PAYPAL_ENVIRONMENT` is classified live and refused at startup) |
 | Fail-closed startup validation | `config.py`, `main.py` | Implemented and verified | `tests/test_security.py`, `tests/test_deployment_safety.py` |
-| Request body cap | `main.py` | Implemented and verified | `tests/test_security.py` |
+| Request body cap | `main.py` (`LimitRequestBodyMiddleware`) | Implemented and verified | `tests/test_security.py` |
+| Response hardening headers | `main.py` (`SecurityHeadersMiddleware`), `vercel.json` | Implemented and verified | `tests/test_security.py` (nosniff, `X-Frame-Options`/`frame-ancestors`, `Referrer-Policy`, `Permissions-Policy`, COOP on 200/401/404) |
 | Bounded run concurrency | `core/engine.py`, `api/routes.py` | Implemented and verified | `tests/test_security.py` |
 | Money-route rate limiting | `core/rate_limit.py`, `api/routes.py` (`_enforce_rate_limit`) | Implemented and verified | `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py`, `tests/test_deployment_safety.py` (shared counter, guest keyed on address, fails closed, production refuses disable) |
 | Reputation + market selection | `core/store.py`, `core/dbstore.py`, `core/negotiation.py` | Implemented and verified | `tests/test_reconciliation_reputation.py` |
-| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (43 tests); production app returns 200; axe-core reports 0 violations and 0 sub-24px targets at 390/768/1440px (empty, negotiation, verification states) |
+| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (52 tests); production app returns 200; axe-core reports 0 violations on the home and ledger views at 390/768/1440px |
+| Frontend code-splitting | `frontend/src/components/LedgerPanel.jsx`, `frontend/src/App.jsx` | Implemented and verified (on PR #33; not yet deployed) | `frontend/test/bundle-a11y.test.js`; the initial bundle is ~190 kB (AG Grid is loaded lazily on the Ledger tab, its own ~1.26 MB chunk). Production at `530ced6` still serves the pre-split ~1.14 MB initial chunk |
+| Deterministic production build | `frontend/vite.config.js` | Implemented and verified | `frontend/test/bundle-a11y.test.js`; the build pins `NODE_ENV=production`, so an ambient `NODE_ENV=development` can no longer ship React's development bundle (411 kB vs 190 kB). See `docs/architecture-decisions/0010-pin-node-env-for-build.md` |
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
 | Customer accounts + email outbox | `core/accounts.py`, `core/auth_store.py`, `core/email.py` | Implemented but partially verified | `tests/test_accounts.py`, `tests/test_auth_routes.py`, `tests/test_email_dispatcher.py`; the end-to-end email path needs a provider and is not exercised live |
 | Pooled-endpoint settlement routing | `core/pool.py`, `core/dbstore.py` | Implemented but partially verified | `tests/test_settlement_pooling.py` runs only when `PGBOUNCER_URL` is set (CI provides it; a bare local run skips 5 tests) |
@@ -62,28 +65,32 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 
 | Idea | Status |
 |---|---|
-| Frontend code-splitting (bundle is a single ~1.1 MB chunk) | Planned |
 | A real-money deployment path with operational controls | Planned (out of scope; the sandbox-only guard would need explicit operator intent) |
 | Pluggable verifiers (e.g. running tests against a code deliverable) | Planned |
 | Additional settlement rails behind the same escrow interface | Planned |
 | An independent security audit / certification | Not done |
-| A ledger grid with no accessibility violations | Known limitation: AG Grid 33 emits `role="presentation"` viewports that carry `tabindex="-1"`, which axe flags as `aria-required-children` (critical). It is library-internal, has no public option to remove it, and is present on the unmodified production build. The grid keeps working sort/resize, which a replacement would drop. |
+
+> The ledger grid accessibility limitation recorded here previously (AG Grid 33
+> emitting a `tabindex="-1"` on a `role="presentation"` header viewport, flagged by
+> axe as `aria-required-children`) was **resolved in the beta-readiness pass** by
+> upgrading to AG Grid 36, whose DOM omits it. See the feature inventory below and
+> `frontend/test/bundle-a11y.test.js`.
 
 ## Verification summary (this repository)
 
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **509 passed, 104 skipped**.
-- Backend (PostgreSQL 17): **606 passed, 7 skipped** (the 7 need a separate
-  transaction-mode pooler endpoint, `PGBOUNCER_URL`, which the CI job provides;
-  they were not run in this local verification).
-- Frontend: **43 passed**; production build succeeds.
+- Backend (filesystem store): **516 passed, 103 skipped**.
+- Backend (PostgreSQL 17): **613 passed, 6 skipped**.
+- Backend (PostgreSQL + transaction-mode pooler): **619 passed, 0 skipped**.
+- Frontend: **52 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.
 - Production `/api/health`: `status: ok`, `paypal.environment: sandbox`,
   `paypal.is_live: false`, `paypal.mode: sandbox`, `llm.is_mock: false`,
-  `storage: {backend: postgres, durable: true}` *(live, deployed commit `f1e146b`)*.
+  `storage: {backend: postgres, durable: true}`, `rate_limit: {enabled: true,
+  scope: postgres}` *(live, deployed commit `530ced6`)*.
 
 ## Related
 

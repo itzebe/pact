@@ -105,7 +105,7 @@ cd backend && source .venv/bin/activate
 python -m pytest tests/ -q
 ```
 
-Expected (verified in this repository): **465 passed, 90 skipped**. The skips are
+Expected (verified in this repository): **516 passed, 103 skipped**. The skips are
 the PostgreSQL integration tests, which skip themselves when no database is
 reachable — a skip is not a pass.
 
@@ -118,9 +118,9 @@ export DATABASE_URL=postgresql://localhost/pact
 python -m pytest tests/ -q
 ```
 
-Expected: **550 passed, 5 skipped**. The remaining 5 skips need a *separate*
-transaction-mode pooler endpoint (`PGBOUNCER_URL`) to prove the settlement lock is
-not routed through it; the CI job provides one.
+Expected: **613 passed, 6 skipped**. Supply a *separate* transaction-mode pooler
+endpoint (`PGBOUNCER_URL`) to run those last 6 as well; with it reachable the suite
+reports **619 passed, 0 skipped**. The CI job provides one.
 
 ### Frontend
 
@@ -130,7 +130,7 @@ npm test             # Node's built-in runner
 npm run build        # production bundle
 ```
 
-Expected: **43 passed** and a successful build.
+Expected: **52 passed** and a successful build.
 
 ### Lint
 

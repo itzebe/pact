@@ -160,6 +160,62 @@ scoping, seller scoping, buyer-cannot-reconcile, body `buyer_id` ignored).
 *Tests:* `tests/test_security.py` (oversized body, oversized chunked body, too many
 criteria, non-finite budget).
 
+### Response hardening headers
+
+- Every HTTP response carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none';
+  object-src 'none'; base-uri 'self'`, `Referrer-Policy:
+  strict-origin-when-cross-origin`, `Permissions-Policy` (camera, microphone and
+  geolocation disabled), `Cross-Origin-Opener-Policy: same-origin`, and
+  `X-Permitted-Cross-Domain-Policies: none`.
+- They are attached by an **outermost ASGI middleware**
+  (`SecurityHeadersMiddleware`), so an error response (401, 404, 413) carries them
+  exactly as a 200 does — a browser only applies a header on the response it
+  actually receives.
+- The CSP is deliberately limited to framing/embedding directives. It is **not** a
+  `script-src`/`style-src` policy: the Vite bundle relies on inline styles, so a
+  `default-src` policy here would break the app. `frame-ancestors`/`X-Frame-Options`
+  stop the guest's approve/refund controls being overlaid in a third-party frame;
+  `Referrer-Policy` keeps the job id out of the `Referer` sent to PayPal on the
+  approval redirect.
+- On the Vercel deployment the SPA document is served statically (not by the Python
+  function), so the same headers are set for non-`/api` paths in `vercel.json`. HSTS
+  is already sent by the Vercel edge on every response and is not set here.
+- A header a route set itself is never overwritten — the middleware only adds
+  missing ones.
+
+*Source:* `backend/pact/main.py` (`SecurityHeadersMiddleware`), `vercel.json`.
+*Tests:* `tests/test_security.py` (headers on 200/401/404, CSP scope pinned, a
+downstream header preserved, the 413 body-cap response and both CORS preflight
+answers hardened).
+
+### Cross-Origin-Opener-Policy and the PayPal approval flow
+
+`Cross-Origin-Opener-Policy: same-origin` severs the browsing-context group: a
+window the app opens with `window.open` no longer shares `window.opener`, and the
+new window cannot `postMessage` back. That is exactly the mechanism a **popup-based**
+PayPal integration relies on, so COOP is only safe while the approval flow does not
+depend on it. It does not:
+
+- The approval control is a plain top-level navigation —
+  `<a href={approvalUrl} target="_blank" rel="noreferrer">` in
+  `frontend/src/components/PaymentStatus.jsx`. `noreferrer` also implies `noopener`,
+  so the opened tab cannot reach back into this one even without COOP; the two
+  protections agree rather than conflict.
+- The return from PayPal is read from the `?job=` query string on load
+  (`frontend/src/App.jsx`), not from a message the PayPal window sends.
+- The app references **no** `window.opener`, `postMessage`, or `window.open`, and
+  does not load the PayPal JS SDK — the order/authorize/capture/void/refund calls are
+  all server-side (`backend/pact/paypal/escrow.py`).
+
+The invariant is pinned by `frontend/test/coop-paypal.test.js`. If a future change
+introduces a popup integration or a cross-window handshake, that test fails — the
+signal that COOP has to be revisited, not that the test is wrong.
+
+*Source:* `frontend/src/App.jsx`, `frontend/src/components/PaymentStatus.jsx`,
+`vercel.json`.
+*Tests:* `frontend/test/coop-paypal.test.js`.
+
 ### Fail-closed behaviour
 
 - Missing auth secret → `503` on protected routes; production refuses to start.
@@ -270,6 +326,8 @@ deployment reads `environment: "sandbox"`, `is_live: false`, `mode: "sandbox"` a
 | 17 | Unbounded resource use | `run` concurrency | Bounded semaphore; run deadline; `429`/`504` | `tests/test_security.py` (excess runs refused, overrun abandoned) |
 | 18 | Non-durable ledger in production | Missing `DATABASE_URL` | Production refuses to start without a database | `tests/test_security.py`, `test_deployment_safety.py` |
 | 19 | Provider rate-limit exhaustion / repeated provider calls | Money routes | Per-identity fixed window (`429`); shared counter; fails closed | `tests/test_rate_limit.py`, `test_rate_limit_postgres.py` |
+| 20 | Clickjacking the guest's approve/refund controls; MIME confusion on error bodies; job id leaked in the PayPal `Referer` | Any response; approval redirect | Hardening headers (`X-Frame-Options`, `frame-ancestors`, `nosniff`, `Referrer-Policy`) on every response, including 413 and CORS rejections | `tests/test_security.py` (hardening headers on 200/401/404/413 and both CORS preflight answers) |
+| 21 | A response-hardening header silently breaking the buyer approval flow | Approval redirect; browser context | COOP is safe because approval is a top-level redirect with `rel="noreferrer"` and no cross-window channel exists; pinned so a future popup integration fails loudly | `frontend/test/coop-paypal.test.js` |
 
 ## Security testing
 
@@ -278,8 +336,9 @@ The controls above are covered by the backend suite. The dedicated security file
 document), supported by `test_deployment_safety.py`, `test_guests.py`,
 `test_webhook_route.py`, `test_refund_route.py`, `test_rate_limit.py`, and the
 PostgreSQL integration tests (`test_ticket_store_postgres.py`,
-`test_rate_limit_postgres.py`). See [`implementation-status.md`](implementation-status.md)
-for current counts.
+`test_rate_limit_postgres.py`). The COOP/approval-flow compatibility invariant is a
+frontend test (`frontend/test/coop-paypal.test.js`). See
+[`implementation-status.md`](implementation-status.md) for current counts.
 
 ## What is not claimed
 

@@ -191,10 +191,11 @@ runs on a direct (unpooled) endpoint derived from `DATABASE_URL` or set as
 
 ## 12. Verified status (as of the documentation commit)
 
-- Backend suite: **606 passed, 7 skipped** against PostgreSQL 17 (the 7 skips need a
-  separate PgBouncer endpoint, which the CI job provides).
-- Backend suite without a database: **509 passed, 104 skipped**.
-- Frontend suite: **43 passed**.
+- Backend suite: **619 passed, 0 skipped** with PostgreSQL 17 plus a
+  transaction-mode pooler (the CI configuration); **613 passed, 6 skipped** with
+  PostgreSQL alone (the 6 need the separate pooler endpoint).
+- Backend suite without a database: **516 passed, 103 skipped**.
+- Frontend suite: **52 passed**.
 - `pyflakes` clean; frontend production build succeeds.
 - Production `/api/health` returns `status: ok` with `paypal.mode: sandbox`,
   `llm.is_mock: false`, `storage.backend: postgres`, `storage.durable: true`.
@@ -210,7 +211,9 @@ The skips are environment-gated, not failures; see
 - Verification is a model plus deterministic checks, not a formal proof.
 - Customer self-service accounts and transactional email are implemented but
   disabled by default (they need a verified email sending domain).
-- The frontend bundle is a single ~1.1 MB chunk (gzip ~325 kB); no code-splitting yet.
+- The frontend is code-split: the initial bundle is ~190 kB (gzip ~59 kB), and the
+  AG Grid ledger is a lazily-loaded ~1.26 MB chunk fetched only when the Ledger tab
+  is opened.
 
 ## 14. How to run and test
 
