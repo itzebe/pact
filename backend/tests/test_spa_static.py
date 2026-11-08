@@ -51,3 +51,21 @@ def test_a_missing_asset_still_404s_rather_than_returning_html(tmp_path):
     """
     response = _client(tmp_path).get("/assets/missing.js")
     assert response.status_code == 404
+
+
+def test_an_unknown_api_path_is_not_swallowed_by_the_spa_mount(tmp_path):
+    """The single-container image must answer an unknown ``/api`` path with a JSON 404.
+
+    The mount sits at ``/`` and its fallback returns ``index.html`` for any
+    extension-less path, so a mistyped API route such as ``/api/nope`` was served
+    the HTML shell with a 200. A client that parses the response as JSON then fails
+    confusingly, and the API surface silently lies about which routes exist. The
+    API routes are matched before the mount in the real app, so any ``/api`` path
+    reaching the mount is by definition unknown and must stay a 404 — including the
+    bare ``/api``, which the Vercel deployment also answers with a JSON 404.
+    """
+    client = _client(tmp_path)
+    for path in ("/api", "/api/", "/api/definitely-not-a-route"):
+        response = client.get(path)
+        assert response.status_code == 404, path
+        assert "text/html" not in response.headers["content-type"], path

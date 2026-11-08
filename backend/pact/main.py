@@ -215,6 +215,12 @@ class _SPAStaticFiles(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
+            # An unknown API path must stay a JSON 404. The Vercel deployment keeps
+            # /api/* on the API function, but this single-container image mounts the
+            # SPA at / and would otherwise answer a mistyped API path with the HTML
+            # shell (200), which a client would try to parse as JSON.
+            if scope["path"] == "/api" or scope["path"].startswith("/api/"):
+                raise
             if exc.status_code == 404 and "." not in Path(path).name:
                 return await super().get_response("index.html", scope)
             raise
