@@ -79,8 +79,9 @@ Recorded in [`evidence/README.md`](evidence/README.md) and
 - Frontend: **43 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.
-- Production `/api/health`: `status: ok`, `paypal.mode: sandbox`, `llm.is_mock:
-  false`, `storage: {backend: postgres, durable: true}` *(live)*.
+- Production `/api/health`: `status: ok`, `paypal.environment: sandbox`,
+  `paypal.is_live: false`, `paypal.mode: sandbox`, `llm.is_mock: false`,
+  `storage: {backend: postgres, durable: true}` *(live, deployed commit `f1e146b`)*.
 
 ## Related
 

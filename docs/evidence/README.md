@@ -24,15 +24,20 @@ The machine-readable version is [`metadata/evidence.json`](../../metadata/eviden
 | 2026-11-03 | Judge-facing walkthrough and preserved evidence | PR #23 |
 | 2026-11-03 | Hackathon submission package | PR #24 |
 | 2026-11-03 | Final narrated demo video | PR #25 (`4ce1faf`) |
+| 2026-11-07 | Canonical documentation system | PR #26 |
+| 2026-11-07 | Fix WCAG 2.2 AA defects | PR #27 |
+| 2026-11-07 | Fix psycopg3 prepared-statement race | PR #28 |
+| 2026-11-07 | Wire `PACT_PG_*` pool settings | PR #29 |
+| 2026-11-07 | Health reports `is_live`; fail closed on an unrecognised `PAYPAL_ENVIRONMENT` | PR #30 (`f1e146b`) |
 
-All 25 pull requests are merged into `master`; there are no open pull requests.
+All 30 pull requests are merged into `master`; there are no open pull requests.
 Verified via the GitHub API at documentation time.
 
 ## Release history
 
 PACT has **no tagged releases**. The `master` branch is the release. The latest
-merged change on `master` is PR #25 (`4ce1faf`, 2026-11-03). See
-[`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
+merged change on `master` is PR #30 (`f1e146b`, 2026-11-07), deployed to production
+at the same commit. See [`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
 
 ## Deployment references
 
@@ -42,12 +47,12 @@ merged change on `master` is PR #25 (`4ce1faf`, 2026-11-03). See
 - **Database:** PostgreSQL (Neon-compatible)
 - **Payments:** PayPal Sandbox
 
-Live health verified on 2026-11-07:
+Live health verified on 2026-11-07 (deployed commit `f1e146b`):
 
 ```json
 {
   "status": "ok",
-  "paypal": { "configured": true, "environment": "sandbox", "mode": "sandbox", "settlement_is_real": true, "webhook_verification": true },
+  "paypal": { "configured": true, "environment": "sandbox", "is_live": false, "mode": "sandbox", "settlement_is_real": true, "webhook_verification": true, "sandbox_only": false },
   "llm": { "configured": true, "is_mock": false, "model": "openai/gpt-oss-20b @ https://api.groq.com/openai/v1" },
   "storage": { "backend": "postgres", "durable": true }
 }

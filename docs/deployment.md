@@ -132,13 +132,17 @@ safe. See `docs/security.md` → *Sandbox-only guard*.
 production deployment reports:
 
 ```json
-{ "status": "ok", "paypal": { "mode": "sandbox" }, "llm": { "is_mock": false }, "storage": { "backend": "postgres", "durable": true } }
+{ "status": "ok", "paypal": { "mode": "sandbox", "is_live": false }, "llm": { "is_mock": false }, "storage": { "backend": "postgres", "durable": true } }
 ```
 
 - `status: degraded` means the durable store could not be opened; settlement is
   disabled and `storage.error` carries a fixed classification.
 - `storage.backend: postgres` and `storage.durable: true` confirm the multi-instance
   path is in use.
+- `paypal.is_live: false` and `paypal.mode: "sandbox"` confirm the process is pointed at
+  PayPal Sandbox. `paypal.is_live` is the authoritative environment indicator;
+  `paypal.sandbox_only` is the separate, off-by-default guard switch (see
+  [ADR 0007](architecture-decisions/0007-health-reports-is-live.md)).
 - `llm.is_mock: true` means no model key is configured.
 - `paypal.settlement_is_real: false` means the mock is in use (no money moves).
 
