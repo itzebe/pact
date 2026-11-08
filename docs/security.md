@@ -197,8 +197,14 @@ criteria, non-finite budget).
   transaction-scoped advisory lock on `(scope, key)` before counting, so two instances
   evaluating the same identity at once cannot both read an under-limit count and both
   record. Without this the limit could be exceeded by the number of racing instances.
-  A concurrency test (`test_two_instances_racing_allow_exactly_the_limit`) pins the
-  invariant against real PostgreSQL.
+  The lock is taken on the caller's transaction, so it also holds through the
+  transaction-mode pooler production uses as its `DATABASE_URL`. A deterministic test
+  (`test_check_waits_on_the_per_identity_advisory_lock`) proves `check` blocks on that
+  lock, and a race test plus a pooled-endpoint variant pin the invariant against real
+  PostgreSQL and through PgBouncer.
+- Counted rows are **pruned** past the retention horizon (the largest configured
+  window, floored at one hour) in bounded batches, so the table cannot grow without
+  bound and a prune never deletes a row that is still counting.
 - A configured-but-unreachable shared store **refuses** every money-route request
   rather than serving unbounded, because the failure mode of a money route must be
   "do not call the provider".

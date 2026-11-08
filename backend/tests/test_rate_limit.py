@@ -103,6 +103,104 @@ def test_an_anonymous_identity_is_the_address():
     assert identity_for(None, False, "iphash") == "ip:iphash"
 
 
+# ------------------------------------------------------- the client address
+
+
+def test_a_forged_leftmost_forwarded_for_cannot_change_the_identity():
+    """The identity comes from the *rightmost* XFF entry, so a caller cannot rotate it.
+
+    A caller controls the leftmost ``x-forwarded-for`` value (the trusted proxy
+    appends to it), so if the leftmost were used a caller could forge a new value on
+    every request and evade the per-address limit. Two requests that differ only in
+    their forged leftmost entry must map to the same identity.
+    """
+    from pact.api.auth import client_ip_hash
+
+    class _Req:
+        def __init__(self, xff: str) -> None:
+            self.headers = {"x-forwarded-for": xff}
+            self.client = None
+
+    real = "203.0.113.9"
+    forged_a = client_ip_hash(_Req(f"1.2.3.4, {real}"))
+    forged_b = client_ip_hash(_Req(f"9.9.9.9, {real}"))
+    assert forged_a == forged_b, "the forged leftmost entry must not affect the identity"
+    # And a different *real* address (rightmost) is a different identity.
+    assert client_ip_hash(_Req("1.2.3.4, 198.51.100.7")) != forged_a
+
+
+def test_the_address_falls_back_to_the_socket_peer_without_a_proxy():
+    from pact.api.auth import client_ip_hash
+
+    class _Peer:
+        host = "198.51.100.7"
+
+    class _Req:
+        headers: dict = {}
+        client = _Peer()
+
+    assert client_ip_hash(_Req()) == client_ip_hash(_Req())  # stable
+    with_xff = client_ip_hash(type("_R", (), {"headers": {"x-forwarded-for": "198.51.100.7"}, "client": None})())
+    assert client_ip_hash(_Req()) == with_xff
+
+
+# ------------------------------------------------- selecting the store honestly
+
+
+def test_a_configured_store_that_cannot_be_opened_refuses_rather_than_falling_back(monkeypatch):
+    """No silent downgrade: a shared limiter that fails to open must not become local.
+
+    Falling back to a process-local counter when a shared store was asked for would
+    let a caller spend its whole budget once per instance — the exact hole the shared
+    counter closes — so the limiter refuses instead.
+    """
+    from dataclasses import replace
+
+    from pact import config
+    from pact.core import rate_limit as rl
+
+    monkeypatch.setattr(rl, "settings", replace(config.settings, database_url="postgresql://unreachable/db"))
+    monkeypatch.setattr(
+        rl, "PostgresRateLimiter", lambda dsn: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    chosen = rl._select_rate_limiter()
+    assert isinstance(chosen, rl.UnavailableRateLimiter)
+    assert not isinstance(chosen, rl.InMemoryRateLimiter)
+
+
+def test_no_database_uses_the_process_local_counter(monkeypatch):
+    from dataclasses import replace
+
+    from pact import config
+    from pact.core import rate_limit as rl
+
+    monkeypatch.setattr(rl, "settings", replace(config.settings, database_url=""))
+    assert isinstance(rl._select_rate_limiter(), rl.InMemoryRateLimiter)
+
+
+# ------------------------------------------------------------------- retention
+
+
+def test_retention_never_falls_below_the_longest_configured_window(monkeypatch):
+    """The prune floor must not delete rows that are still inside a counting window.
+
+    A fixed one-hour floor would silently drop active rows if an operator set a
+    window longer than an hour, so retention is derived from the configured windows.
+    """
+    from dataclasses import replace
+
+    from pact import config
+    from pact.core import rate_limit as rl
+
+    assert rl.retention_seconds() >= rl.MAX_RETENTION_SECONDS
+
+    long_window = replace(
+        config.settings.rate_limit, run_window_seconds=rl.MAX_RETENTION_SECONDS + 5000
+    )
+    monkeypatch.setattr(rl, "settings", replace(config.settings, rate_limit=long_window))
+    assert rl.retention_seconds() >= rl.MAX_RETENTION_SECONDS + 5000
+
+
 # ----------------------------------------------------------------- the routes
 
 

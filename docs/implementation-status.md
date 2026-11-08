@@ -74,8 +74,8 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **504 passed, 99 skipped**.
-- Backend (PostgreSQL 17): **597 passed, 6 skipped** (the 6 need a separate
+- Backend (filesystem store): **509 passed, 104 skipped**.
+- Backend (PostgreSQL 17): **606 passed, 7 skipped** (the 7 need a separate
   transaction-mode pooler endpoint, `PGBOUNCER_URL`, which the CI job provides;
   they were not run in this local verification).
 - Frontend: **43 passed**; production build succeeds.

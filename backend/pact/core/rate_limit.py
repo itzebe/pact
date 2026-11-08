@@ -152,8 +152,29 @@ WHERE r.id = e.id
 """
 
 CLEANUP_BATCH = 500
-#: Rows older than this are always prunable, whatever the configured windows are.
+#: A floor on retention. Rows older than the longest configured window are always
+#: safe to delete, so the effective retention is ``max(this, longest window)`` —
+#: never a fixed value that could fall below an operator's longer window.
 MAX_RETENTION_SECONDS = 3600
+
+
+def retention_seconds() -> int:
+    """The age past which a counted row can never affect a decision.
+
+    Derived from the configured windows rather than a constant, so raising a window
+    above the floor can never let the prune delete rows that are still counting.
+    """
+    rl = settings.rate_limit
+    longest_window = max(
+        rl.run_window_seconds,
+        rl.approve_window_seconds,
+        rl.cancel_window_seconds,
+        rl.reconcile_window_seconds,
+        rl.refund_window_seconds,
+        rl.job_create_window_seconds,
+        rl.read_window_seconds,
+    )
+    return max(MAX_RETENTION_SECONDS, longest_window)
 
 
 class InMemoryRateLimiter:
@@ -283,7 +304,7 @@ class PostgresRateLimiter:
     def prune(self, limit: int | None = None) -> int:
         batch = CLEANUP_BATCH if limit is None else limit
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(_PRUNE_SQL, (MAX_RETENTION_SECONDS, batch))
+            cur.execute(_PRUNE_SQL, (retention_seconds(), batch))
             return cur.rowcount
 
     def reset(self) -> None:
