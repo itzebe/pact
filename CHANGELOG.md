@@ -6,8 +6,9 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #33**
-(`41958ab`, 2026-11-08), deployed to production at the same commit.
+the `master` branch. The latest merge on `master` is **PR #34**
+(`fb69db8`, 2026-11-08), which records the PR #33 release; the latest **code release**
+is **PR #33** (`41958ab`, 2026-11-08), deployed to production at that commit.
 
 ## 2026-11-08 — PR #33: beta-readiness hardening, two release-blocking fixes, and documentation to the shipped state
 

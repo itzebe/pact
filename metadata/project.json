@@ -14,8 +14,10 @@
     "license": "MIT",
     "language": "Python",
     "visibility": "public",
-    "latest_known_master_commit": "41958ab",
-    "latest_known_master_pr": 33,
+    "latest_known_master_commit": "fb69db8",
+    "latest_known_master_pr": 34,
+    "latest_code_release_commit": "41958ab",
+    "latest_code_release_pr": 33,
     "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time."
   },
   "production": {
@@ -84,7 +86,7 @@
       "llms-full.txt"
     ],
     "agent_instructions": "AGENTS.md",
-    "last_verified_commit": "41958ab",
+    "last_verified_commit": "fb69db8",
     "last_verified_date": "2026-11-08"
   },
   "status_vocabulary": [

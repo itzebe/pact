@@ -70,7 +70,7 @@ The second challenge was guardrails. Models will happily agree to a price above 
 - An agent market that visibly self-corrects through reputation, demonstrated end to end.
 - A tamper-evident audit trail a finance team could actually reconcile against.
 - Runs with zero setup: no PayPal account or API key needed to see the whole thing work, but real sandbox settlement the moment credentials are added.
-- 513 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app. 437 run with no external dependencies; the remaining 76 are Postgres durability, pooling, session, and outbox tests that run when `DATABASE_URL` is set (see [README.md](../README.md#3-tests)).
+- 619 tests, including the real PayPal client exercised through its HTTP layer with only the network boundary stubbed, and API contract tests against the live FastAPI app. 516 run with no external dependencies; the remaining 103 are Postgres durability, pooling, session, and outbox tests that run when `DATABASE_URL` is set (619 with a transaction-mode pooler endpoint, as in CI). See [README.md](../README.md#3-tests).
 
 ## What we learned
 
