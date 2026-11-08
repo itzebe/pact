@@ -175,15 +175,23 @@
       "description": "React/Vite/Tailwind UI: composer, negotiation, verification, ledger, payment panel, reputation.",
       "implementation": ["frontend/src/"],
       "status": "implemented_verified",
-      "evidence": ["frontend/test/*.js (46 tests)", "live: production root returns 200"]
+      "evidence": ["frontend/test/*.js (52 tests)", "live: production root returns 200"]
     },
     {
       "id": "frontend_code_splitting",
       "name": "Frontend code-splitting",
-      "description": "AG Grid is loaded only on the Ledger tab through a dynamic import (frontend/src/components/LedgerPanel.jsx), so the initial bundle is ~190 kB instead of ~1.14 MB; the grid is its own ~1.26 MB chunk fetched on demand.",
+      "description": "AG Grid is loaded only on the Ledger tab through a dynamic import (frontend/src/components/LedgerPanel.jsx), so the initial bundle is ~190 kB instead of ~1.14 MB; the grid is its own ~1.26 MB chunk fetched on demand. Ships on PR #33; production at 530ced6 still serves the pre-split ~1.14 MB initial chunk.",
       "implementation": ["frontend/src/components/LedgerPanel.jsx", "frontend/src/App.jsx"],
       "status": "implemented_verified",
       "evidence": ["frontend/test/bundle-a11y.test.js", "live: ledger tab loads the lazy chunk and renders every row"]
+    },
+    {
+      "id": "deterministic_production_build",
+      "name": "Deterministic production build",
+      "description": "frontend/vite.config.js pins NODE_ENV=production for the build command, so an ambient NODE_ENV=development can no longer silently ship React's development bundle (411 kB vs 190 kB initial chunk).",
+      "implementation": ["frontend/vite.config.js"],
+      "status": "implemented_verified",
+      "evidence": ["frontend/test/bundle-a11y.test.js", "docs/architecture-decisions/0010-pin-node-env-for-build.md"]
     },
     {
       "id": "response_hardening_headers",

@@ -68,10 +68,10 @@ Commands run on 2026-11-08 in the workspace container (Python 3.13.15, Node
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend (filesystem) | `python -m pytest tests/ -q` | **512 passed, 104 skipped** |
-| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **609 passed, 7 skipped** |
-| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **615 passed, 1 skipped** |
-| Frontend unit | `npm test` | **46 passed** |
+| Backend (filesystem) | `python -m pytest tests/ -q` | **514 passed, 104 skipped** |
+| Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **611 passed, 7 skipped** |
+| Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **617 passed, 1 skipped** |
+| Frontend unit | `npm test` | **52 passed** |
 | Frontend build | `npm run build` | success |
 | Lint | `python -m pyflakes pact/ scripts/` | clean |
 

@@ -186,7 +186,35 @@ criteria, non-finite budget).
 
 *Source:* `backend/pact/main.py` (`SecurityHeadersMiddleware`), `vercel.json`.
 *Tests:* `tests/test_security.py` (headers on 200/401/404, CSP scope pinned, a
-downstream header preserved).
+downstream header preserved, the 413 body-cap response and both CORS preflight
+answers hardened).
+
+### Cross-Origin-Opener-Policy and the PayPal approval flow
+
+`Cross-Origin-Opener-Policy: same-origin` severs the browsing-context group: a
+window the app opens with `window.open` no longer shares `window.opener`, and the
+new window cannot `postMessage` back. That is exactly the mechanism a **popup-based**
+PayPal integration relies on, so COOP is only safe while the approval flow does not
+depend on it. It does not:
+
+- The approval control is a plain top-level navigation —
+  `<a href={approvalUrl} target="_blank" rel="noreferrer">` in
+  `frontend/src/components/PaymentStatus.jsx`. `noreferrer` also implies `noopener`,
+  so the opened tab cannot reach back into this one even without COOP; the two
+  protections agree rather than conflict.
+- The return from PayPal is read from the `?job=` query string on load
+  (`frontend/src/App.jsx`), not from a message the PayPal window sends.
+- The app references **no** `window.opener`, `postMessage`, or `window.open`, and
+  does not load the PayPal JS SDK — the order/authorize/capture/void/refund calls are
+  all server-side (`backend/pact/paypal/escrow.py`).
+
+The invariant is pinned by `frontend/test/coop-paypal.test.js`. If a future change
+introduces a popup integration or a cross-window handshake, that test fails — the
+signal that COOP has to be revisited, not that the test is wrong.
+
+*Source:* `frontend/src/App.jsx`, `frontend/src/components/PaymentStatus.jsx`,
+`vercel.json`.
+*Tests:* `frontend/test/coop-paypal.test.js`.
 
 ### Fail-closed behaviour
 
@@ -298,7 +326,8 @@ deployment reads `environment: "sandbox"`, `is_live: false`, `mode: "sandbox"` a
 | 17 | Unbounded resource use | `run` concurrency | Bounded semaphore; run deadline; `429`/`504` | `tests/test_security.py` (excess runs refused, overrun abandoned) |
 | 18 | Non-durable ledger in production | Missing `DATABASE_URL` | Production refuses to start without a database | `tests/test_security.py`, `test_deployment_safety.py` |
 | 19 | Provider rate-limit exhaustion / repeated provider calls | Money routes | Per-identity fixed window (`429`); shared counter; fails closed | `tests/test_rate_limit.py`, `test_rate_limit_postgres.py` |
-| 20 | Clickjacking the guest's approve/refund controls; MIME confusion on error bodies; job id leaked in the PayPal `Referer` | Any response; approval redirect | Hardening headers (`X-Frame-Options`, `frame-ancestors`, `nosniff`, `Referrer-Policy`) on every response | `tests/test_security.py` (hardening headers on 200/401/404) |
+| 20 | Clickjacking the guest's approve/refund controls; MIME confusion on error bodies; job id leaked in the PayPal `Referer` | Any response; approval redirect | Hardening headers (`X-Frame-Options`, `frame-ancestors`, `nosniff`, `Referrer-Policy`) on every response, including 413 and CORS rejections | `tests/test_security.py` (hardening headers on 200/401/404/413 and both CORS preflight answers) |
+| 21 | A response-hardening header silently breaking the buyer approval flow | Approval redirect; browser context | COOP is safe because approval is a top-level redirect with `rel="noreferrer"` and no cross-window channel exists; pinned so a future popup integration fails loudly | `frontend/test/coop-paypal.test.js` |
 
 ## Security testing
 
@@ -307,8 +336,9 @@ The controls above are covered by the backend suite. The dedicated security file
 document), supported by `test_deployment_safety.py`, `test_guests.py`,
 `test_webhook_route.py`, `test_refund_route.py`, `test_rate_limit.py`, and the
 PostgreSQL integration tests (`test_ticket_store_postgres.py`,
-`test_rate_limit_postgres.py`). See [`implementation-status.md`](implementation-status.md)
-for current counts.
+`test_rate_limit_postgres.py`). The COOP/approval-flow compatibility invariant is a
+frontend test (`frontend/test/coop-paypal.test.js`). See
+[`implementation-status.md`](implementation-status.md) for current counts.
 
 ## What is not claimed
 

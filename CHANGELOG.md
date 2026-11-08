@@ -11,6 +11,31 @@ the `master` branch. The latest merge on `master` is **PR #32**
 
 ## Unreleased — beta-readiness hardening and documentation corrections
 
+### Fixed — the production build could silently ship React's development bundle
+
+- `frontend/vite.config.js` now forces `NODE_ENV=production` for the `build`
+  command. Vite passes the ambient `NODE_ENV` through to esbuild, and React selects
+  its development entry point unless `NODE_ENV` is exactly `production`. A build run
+  where `NODE_ENV=development` is exported (a common shell setting, and a possible
+  CI/Vercel project variable) emitted **411 kB / 116 kB gzip** for the initial chunk
+  instead of **190 kB / 59 kB gzip** — ~2.2x the JavaScript, plus React's
+  development-only warnings and the DevTools hook — with no error and no failing
+  test. The pin makes the artefact identical wherever the build runs. Pinned by
+  `frontend/test/bundle-a11y.test.js`.
+
+### Added — regression coverage for the response-hardening and COOP invariants
+
+- `backend/tests/test_security.py` now proves the `413` body-cap rejection and both
+  CORS preflight answers (listed origin allowed, unlisted origin refused) carry the
+  hardening headers — the outermost middleware must wrap a response produced by an
+  inner middleware, not just one produced by a route.
+- `frontend/test/coop-paypal.test.js` pins the `Cross-Origin-Opener-Policy:
+  same-origin` compatibility invariant: the app has no `window.opener`,
+  `postMessage`, or `window.open` dependency and does not load the PayPal JS SDK, so
+  COOP cannot break the approval flow (a top-level redirect link with
+  `rel="noreferrer"`, with the return read from the `?job=` query). A future popup
+  integration fails this test, which is the signal to revisit COOP.
+
 ### Added — response hardening headers
 
 - Every response now carries `X-Content-Type-Options: nosniff`, `X-Frame-Options:

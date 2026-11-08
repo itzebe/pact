@@ -51,8 +51,9 @@ check, it is marked *(live)*.
 | Bounded run concurrency | `core/engine.py`, `api/routes.py` | Implemented and verified | `tests/test_security.py` |
 | Money-route rate limiting | `core/rate_limit.py`, `api/routes.py` (`_enforce_rate_limit`) | Implemented and verified | `tests/test_rate_limit.py`, `tests/test_rate_limit_postgres.py`, `tests/test_deployment_safety.py` (shared counter, guest keyed on address, fails closed, production refuses disable) |
 | Reputation + market selection | `core/store.py`, `core/dbstore.py`, `core/negotiation.py` | Implemented and verified | `tests/test_reconciliation_reputation.py` |
-| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (46 tests); production app returns 200; axe-core reports 0 violations on the home and ledger views at 390/768/1440px |
-| Frontend code-splitting | `frontend/src/components/LedgerPanel.jsx`, `frontend/src/App.jsx` | Implemented and verified | `frontend/test/bundle-a11y.test.js`; the initial bundle is ~190 kB (AG Grid is loaded lazily on the Ledger tab, its own ~1.26 MB chunk) |
+| Frontend UI (guest-first) | `frontend/src/` | Implemented and verified | `frontend/test/*` (52 tests); production app returns 200; axe-core reports 0 violations on the home and ledger views at 390/768/1440px |
+| Frontend code-splitting | `frontend/src/components/LedgerPanel.jsx`, `frontend/src/App.jsx` | Implemented and verified (on PR #33; not yet deployed) | `frontend/test/bundle-a11y.test.js`; the initial bundle is ~190 kB (AG Grid is loaded lazily on the Ledger tab, its own ~1.26 MB chunk). Production at `530ced6` still serves the pre-split ~1.14 MB initial chunk |
+| Deterministic production build | `frontend/vite.config.js` | Implemented and verified | `frontend/test/bundle-a11y.test.js`; the build pins `NODE_ENV=production`, so an ambient `NODE_ENV=development` can no longer ship React's development bundle (411 kB vs 190 kB). See `docs/architecture-decisions/0010-pin-node-env-for-build.md` |
 | Frontend payment-state honesty | `frontend/src/lib/status.js` | Implemented and verified | `frontend/test/payment-status.test.js` |
 | Customer accounts + email outbox | `core/accounts.py`, `core/auth_store.py`, `core/email.py` | Implemented but partially verified | `tests/test_accounts.py`, `tests/test_auth_routes.py`, `tests/test_email_dispatcher.py`; the end-to-end email path needs a provider and is not exercised live |
 | Pooled-endpoint settlement routing | `core/pool.py`, `core/dbstore.py` | Implemented but partially verified | `tests/test_settlement_pooling.py` runs only when `PGBOUNCER_URL` is set (CI provides it; a bare local run skips 5 tests) |
@@ -80,11 +81,11 @@ These are **not** shipped. They are recorded so the boundary is explicit.
 Recorded in [`evidence/README.md`](evidence/README.md) and
 [`metadata/evidence.json`](../metadata/evidence.json):
 
-- Backend (filesystem store): **512 passed, 104 skipped**.
-- Backend (PostgreSQL 17): **609 passed, 7 skipped** (the 7 need a separate
+- Backend (filesystem store): **514 passed, 104 skipped**.
+- Backend (PostgreSQL 17): **611 passed, 7 skipped** (the 7 need a separate
   transaction-mode pooler endpoint, `PGBOUNCER_URL`, which the CI job provides;
   they were not run in this local verification).
-- Frontend: **46 passed**; production build succeeds.
+- Frontend: **52 passed**; production build succeeds.
 - `pyflakes`: clean.
 - Dependencies: `pip-audit` and `npm audit` report **0 known vulnerabilities**.
 - Production `/api/health`: `status: ok`, `paypal.environment: sandbox`,

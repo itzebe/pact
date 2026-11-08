@@ -134,7 +134,7 @@ cd backend && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Filesystem-backed suite — the default, no database required.
-# 512 passed, 104 skipped (the Postgres tests skip themselves). The skip count
+# 514 passed, 104 skipped (the Postgres tests skip themselves). The skip count
 # varies with whether the optional psycopg driver is installed.
 python -m pytest tests/ -q
 ```
@@ -148,7 +148,7 @@ Postgres tests skipped:
 uv pip install -e ".[dev,postgres]"
 
 # Point the tests at any reachable Postgres, then run everything.
-# 609 passed, 7 skipped. The 7 remaining skips need a separate transaction-mode
+# 611 passed, 7 skipped. The 7 remaining skips need a separate transaction-mode
 # pooler endpoint (PGBOUNCER_URL) to prove the settlement lock is not routed
 # through it; the CI job provides one.
 createdb pact                                          # or a Neon/Supabase/RDS URL

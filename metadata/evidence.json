@@ -14,27 +14,27 @@
       "name": "backend_filesystem",
       "command": "cd backend && python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true PACT_AUTH_SECRET=<test>",
-      "result": "512 passed, 104 skipped",
+      "result": "514 passed, 104 skipped",
       "note": "The 104 skips are the PostgreSQL integration tests plus the pooled-endpoint tests, which skip themselves when no database (or no PGBOUNCER_URL) is reachable."
     },
     {
       "name": "backend_postgres",
       "command": "cd backend && DATABASE_URL=postgresql://... python -m pytest tests/ -q",
       "environment": "PACT_ENV=test PACT_ALLOW_MOCK_PAYPAL=true, PostgreSQL 17",
-      "result": "609 passed, 7 skipped",
+      "result": "611 passed, 7 skipped",
       "note": "The 7 skips need a separate transaction-mode pooler endpoint (PGBOUNCER_URL), which the CI job provides; they were not run in this local verification."
     },
     {
       "name": "frontend_unit",
       "command": "cd frontend && npm test",
-      "result": "46 passed",
+      "result": "52 passed",
       "runner": "node --test"
     },
     {
       "name": "frontend_build",
       "command": "cd frontend && npm run build",
       "result": "success",
-      "note": "43 modules transformed; initial chunk 190.33 kB (gzip 59.49 kB) plus a lazily-loaded Ledger chunk of 1,259.56 kB (gzip 352.44 kB). The initial bundle was ~1.14 MB before the ledger grid was code-split."
+      "note": "43 modules transformed; initial chunk 190.33 kB (gzip 59.49 kB) plus a lazily-loaded Ledger chunk of 1,259.56 kB (gzip 352.44 kB). Verified identical under a hostile NODE_ENV=development after the vite.config.js pin. The initial bundle was ~1.14 MB before the ledger grid was code-split."
     },
     {
       "name": "lint",
@@ -90,7 +90,9 @@
     "A passing local test is not proof of production deployment.",
     "A successful deployment is not proof that every feature works.",
     "No live real-money settlement was performed; the demo is PayPal Sandbox.",
-    "The demo videos under docs/ are the project's own evidence; see docs/DEMO_EVIDENCE.md for what they do and do not establish."
+    "The demo videos under docs/ are the project's own evidence; see docs/DEMO_EVIDENCE.md for what they do and do not establish.",
+    "The PayPal Sandbox credentials in the Vercel project are stored as `sensitive`, which the Vercel API cannot read back. The live PayPal order/authorize flow was therefore NOT re-executed by the documentation pass; it is evidenced by the project's own demo recording, the production health probe (paypal.mode=sandbox, settlement_is_real=true), and the PayPal client tests. A genuine end-to-end sandbox settlement remains a manual, credentialed step.",
+    "Production at 530ced6 serves an initial JS bundle of 1.14 MB (measured live, /assets/index-BAvMc8sP.js, 2026-11-07); the 190 kB code-split initial bundle is shipped on PR #33 and not yet deployed. The docs state the split is on the PR, not production."
   ],
   "reference": "docs/evidence/README.md"
 }

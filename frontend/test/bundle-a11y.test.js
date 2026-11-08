@@ -68,3 +68,17 @@ test('ag-grid-community is on a major version without the presentation-tabindex 
   assert.ok(major >= 36,
     `ag-grid-community ${range} reintroduces the axe aria-required-children violation; keep >= 36`)
 })
+
+test('the production build pins NODE_ENV so it never ships React development', () => {
+  // Vite passes the ambient NODE_ENV through to esbuild/define, and React selects
+  // its development entry point unless NODE_ENV is exactly "production". A build
+  // run where NODE_ENV=development is exported then emits ~2.2x the JavaScript
+  // with React's dev warnings and DevTools hook. vite.config.js pins it for the
+  // build command; this fails if that pin is removed.
+  const config = readFileSync(join(frontendRoot, 'vite.config.js'), 'utf8')
+  assert.match(
+    config,
+    /command\s*===\s*['"]build['"]\s*\)\s*process\.env\.NODE_ENV\s*=\s*['"]production['"]/,
+    'vite.config.js must set NODE_ENV=production for the build command',
+  )
+})

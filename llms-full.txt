@@ -191,10 +191,10 @@ runs on a direct (unpooled) endpoint derived from `DATABASE_URL` or set as
 
 ## 12. Verified status (as of the documentation commit)
 
-- Backend suite: **609 passed, 7 skipped** against PostgreSQL 17 (the 7 skips need a
+- Backend suite: **611 passed, 7 skipped** against PostgreSQL 17 (the 7 skips need a
   separate PgBouncer endpoint, which the CI job provides).
-- Backend suite without a database: **512 passed, 104 skipped**.
-- Frontend suite: **46 passed**.
+- Backend suite without a database: **514 passed, 104 skipped**.
+- Frontend suite: **52 passed**.
 - `pyflakes` clean; frontend production build succeeds.
 - Production `/api/health` returns `status: ok` with `paypal.mode: sandbox`,
   `llm.is_mock: false`, `storage.backend: postgres`, `storage.durable: true`.

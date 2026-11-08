@@ -903,3 +903,51 @@ def test_a_header_already_set_downstream_is_not_overwritten():
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
+def test_the_413_body_cap_response_carries_the_hardening_headers(client):
+    """The size cap rejects before the route runs; its response must still be hardened.
+
+    ``SecurityHeadersMiddleware`` is the outermost layer precisely so a rejection
+    raised by an inner middleware (the body cap, or CORS) is wrapped too. A 413 is
+    a response a browser receives, so it needs the same headers as a 200.
+    """
+    from pact.main import MAX_REQUEST_BYTES
+
+    oversized = b"x" * (MAX_REQUEST_BYTES + 1024)
+    response = client.post(
+        "/api/jobs",
+        content=oversized,
+        headers={**BUYER, "content-type": "application/json"},
+    )
+    assert response.status_code == 413, response.text
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+def test_a_cors_preflight_is_answered_only_for_an_exact_listed_origin(client):
+    """The preflight policy is an exact-origin allowlist, and both answers are hardened.
+
+    ``allow_credentials=True`` makes a too-loose origin match a direct path to
+    reading and driving another user's settlement, so an unlisted origin must be
+    refused rather than echoed. The hardening headers must ride on the preflight
+    response either way.
+    """
+    allowed = client.options(
+        "/api/jobs",
+        headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"},
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert allowed.headers["access-control-allow-credentials"] == "true"
+    assert allowed.headers["x-content-type-options"] == "nosniff"
+    assert allowed.headers["x-frame-options"] == "DENY"
+
+    refused = client.options(
+        "/api/jobs",
+        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+    )
+    assert refused.status_code == 400
+    assert "access-control-allow-origin" not in refused.headers
+    assert refused.headers["x-content-type-options"] == "nosniff"
+
+

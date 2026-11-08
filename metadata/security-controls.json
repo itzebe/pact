@@ -189,6 +189,14 @@
       "source": ["backend/pact/core/rate_limit.py", "backend/pact/api/routes.py", "backend/pact/config.py", "backend/pact/api/auth.py"],
       "tests": ["backend/tests/test_rate_limit.py", "backend/tests/test_rate_limit_postgres.py", "backend/tests/test_deployment_safety.py"],
       "threats": ["unbounded provider calls from one caller", "provider rate-limit exhaustion for all users", "per-address cap evaded by rotating guest sessions"]
+    },
+    {
+      "id": "coop_paypal_redirect_compatibility",
+      "category": "compatibility",
+      "control": "Cross-Origin-Opener-Policy: same-origin severs the browsing-context group, which would break a popup-based PayPal integration. The approval flow is a top-level redirect: the approval control is an <a href={approvalUrl} target=\"_blank\" rel=\"noreferrer\"> (noreferrer implies noopener), the return is read from the ?job= query string, and the app references no window.opener, postMessage, window.open, or the PayPal JS SDK. COOP therefore cannot break approval; a future popup integration fails the pinned test, which is the signal to revisit COOP.",
+      "source": ["frontend/src/App.jsx", "frontend/src/components/PaymentStatus.jsx", "vercel.json"],
+      "tests": ["frontend/test/coop-paypal.test.js"],
+      "threats": ["approval flow silently broken by a response-hardening header"]
     }
   ],
   "reference": "docs/security.md"
