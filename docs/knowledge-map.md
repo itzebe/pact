@@ -125,6 +125,9 @@ flowchart TB
 
 ## Machine-readable index
 
+- [`project.json`](../project.json) — compact structured facts (also served at `/project.json`)
+- [`llms.txt`](../llms.txt) — compact LLM entry point (also served at `/llms.txt`)
+- [`llms-full.txt`](../llms-full.txt) — consolidated reference (also served at `/llms-full.txt`)
 - [`metadata/project.json`](../metadata/project.json)
 - [`metadata/features.json`](../metadata/features.json)
 - [`metadata/api.json`](../metadata/api.json)

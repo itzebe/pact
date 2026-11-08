@@ -76,7 +76,7 @@ Commands run on 2026-11-08 in the workspace container (Python 3.13.15, Node
 | Backend (filesystem) | `python -m pytest tests/ -q` | **516 passed, 103 skipped** |
 | Backend (PostgreSQL) | `DATABASE_URL=… python -m pytest tests/ -q` | **613 passed, 6 skipped** |
 | Backend (PostgreSQL + PgBouncer) | `DATABASE_URL=… PGBOUNCER_URL=… python -m pytest tests/ -q` | **619 passed, 0 skipped** |
-| Frontend unit | `npm test` | **52 passed** |
+| Frontend unit | `npm test` | **58 passed** |
 | Frontend build | `npm run build` | success |
 | Lint | `python -m pyflakes pact/ scripts/` | clean |
 

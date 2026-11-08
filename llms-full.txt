@@ -8,7 +8,7 @@
 PACT — conditional settlement infrastructure for the agent economy.
 Repository: https://github.com/itzebe/pact · Live: https://pact-flame.vercel.app/ ·
 Health: https://pact-flame.vercel.app/api/health · Default branch: `master` ·
-License: MIT · Documentation version: see [`metadata/project.json`](metadata/project.json).
+License: MIT · Documentation version: see [`metadata/project.json`](https://github.com/itzebe/pact/blob/master/metadata/project.json).
 
 ---
 
@@ -104,7 +104,7 @@ the next job.
 - **AI:** any OpenAI-compatible chat endpoint; three agent roles (seller, buyer
   counter, verifier) plus a deterministic mock fallback when no key is configured.
 
-Full detail: [`docs/architecture.md`](docs/architecture.md).
+Full detail: [`docs/architecture.md`](https://github.com/itzebe/pact/blob/master/docs/architecture.md).
 
 ## 6. Technology stack
 
@@ -129,7 +129,7 @@ VOIDED/PENDING`; capture `COMPLETED/DECLINED/PARTIALLY_REFUNDED/PENDING/REFUNDED
 FAILED`). Only a `COMPLETED` capture is settlement; only a holdable authorization is
 a hold.
 
-Full detail: [`docs/payment-lifecycle.md`](docs/payment-lifecycle.md).
+Full detail: [`docs/payment-lifecycle.md`](https://github.com/itzebe/pact/blob/master/docs/payment-lifecycle.md).
 
 ## 8. AI functionality
 
@@ -143,7 +143,7 @@ Three roles, all through one OpenAI-compatible endpoint:
 The AI **proposes**; it never **authorizes**. The settlement engine decides whether
 money moves, and only the PayPal client moves it. Without an API key a deterministic
 mock policy engine runs so the whole lifecycle still works offline. Full detail:
-[`docs/ai-system.md`](docs/ai-system.md).
+[`docs/ai-system.md`](https://github.com/itzebe/pact/blob/master/docs/ai-system.md).
 
 ## 9. Security
 
@@ -165,7 +165,7 @@ mock policy engine runs so the whole lifecycle still works offline. Full detail:
   (PostgreSQL) so the limit is not spent once per instance and refusing when that
   store is unreachable. Production refuses to start with the guard disabled.
 
-Full detail: [`docs/security.md`](docs/security.md).
+Full detail: [`docs/security.md`](https://github.com/itzebe/pact/blob/master/docs/security.md).
 
 ## 10. Database and ledger
 
@@ -177,7 +177,7 @@ tokens, and the email outbox in their own tables. Migrations are idempotent
 applied at startup. The audit ledger is a per-job, SHA-256 hash chain that is
 tamper-evident and verified live.
 
-Full detail: [`docs/database.md`](docs/database.md).
+Full detail: [`docs/database.md`](https://github.com/itzebe/pact/blob/master/docs/database.md).
 
 ## 11. Deployment
 
@@ -187,7 +187,7 @@ routes `/api/*` to the FastAPI function in `api/index.py`. Production requires
 credentials. Startup validation refuses an unsafe production configuration (no
 secret, no database, mock settlement, or a live PayPal host). The settlement lock
 runs on a direct (unpooled) endpoint derived from `DATABASE_URL` or set as
-`DATABASE_URL_UNPOOLED`. Full detail: [`docs/deployment.md`](docs/deployment.md).
+`DATABASE_URL_UNPOOLED`. Full detail: [`docs/deployment.md`](https://github.com/itzebe/pact/blob/master/docs/deployment.md).
 
 ## 12. Verified status (as of the documentation commit)
 
@@ -195,14 +195,14 @@ runs on a direct (unpooled) endpoint derived from `DATABASE_URL` or set as
   transaction-mode pooler (the CI configuration); **613 passed, 6 skipped** with
   PostgreSQL alone (the 6 need the separate pooler endpoint).
 - Backend suite without a database: **516 passed, 103 skipped**.
-- Frontend suite: **52 passed**.
+- Frontend suite: **58 passed**.
 - `pyflakes` clean; frontend production build succeeds.
 - Production `/api/health` returns `status: ok` with `paypal.mode: sandbox`,
   `llm.is_mock: false`, `storage.backend: postgres`, `storage.durable: true`.
 
 The skips are environment-gated, not failures; see
-[`docs/implementation-status.md`](docs/implementation-status.md) and
-[`metadata/evidence.json`](metadata/evidence.json).
+[`docs/implementation-status.md`](https://github.com/itzebe/pact/blob/master/docs/implementation-status.md) and
+[`metadata/evidence.json`](https://github.com/itzebe/pact/blob/master/metadata/evidence.json).
 
 ## 13. Limitations
 
@@ -217,7 +217,7 @@ The skips are environment-gated, not failures; see
 
 ## 14. How to run and test
 
-See [`docs/development.md`](docs/development.md) for the full, reproducible setup.
+See [`docs/development.md`](https://github.com/itzebe/pact/blob/master/docs/development.md) for the full, reproducible setup.
 Short version:
 
 ```bash
@@ -236,10 +236,10 @@ cd ../frontend && npm install && npm test && npm run build
 
 ## 15. Links
 
-- Product and quick start: [`README.md`](README.md)
-- Documentation index: [`docs/README.md`](docs/README.md)
-- Navigation map: [`docs/knowledge-map.md`](docs/knowledge-map.md)
-- API reference: [`docs/api/README.md`](docs/api/README.md)
-- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Security policy: [`SECURITY.md`](SECURITY.md)
-- Agent instructions: [`AGENTS.md`](AGENTS.md)
+- Product and quick start: [`README.md`](https://github.com/itzebe/pact/blob/master/README.md)
+- Documentation index: [`docs/README.md`](https://github.com/itzebe/pact/blob/master/docs/README.md)
+- Navigation map: [`docs/knowledge-map.md`](https://github.com/itzebe/pact/blob/master/docs/knowledge-map.md)
+- API reference: [`docs/api/README.md`](https://github.com/itzebe/pact/blob/master/docs/api/README.md)
+- Contributing: [`CONTRIBUTING.md`](https://github.com/itzebe/pact/blob/master/CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](https://github.com/itzebe/pact/blob/master/SECURITY.md)
+- Agent instructions: [`AGENTS.md`](https://github.com/itzebe/pact/blob/master/AGENTS.md)

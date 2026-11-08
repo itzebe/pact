@@ -35,7 +35,7 @@
     {
       "name": "frontend_unit",
       "command": "cd frontend && npm test",
-      "result": "52 passed",
+      "result": "58 passed",
       "runner": "node --test"
     },
     {
@@ -123,11 +123,11 @@
   "production_metadata": {
     "repo": "https://github.com/itzebe/pact",
     "default_branch": "master",
-    "latest_master_commit": "aff9d53",
-    "latest_master_pr": 36,
+    "latest_master_commit": "79cecec",
+    "latest_master_pr": 38,
     "latest_code_release_commit": "41958ab",
     "latest_code_release_pr": 33,
-    "merged_pull_requests": 36,
+    "merged_pull_requests": 37,
     "open_pull_requests": 1,
     "github_topics_before": [],
     "license": "MIT"

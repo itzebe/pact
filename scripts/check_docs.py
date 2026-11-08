@@ -31,6 +31,7 @@ REQUIRED_ROOT = [
     "CHANGELOG.md",
     "llms.txt",
     "llms-full.txt",
+    "project.json",
     "LICENSE",
 ]
 
@@ -92,11 +93,37 @@ def strip_code(text: str) -> str:
     return INLINE_CODE.sub("", text)
 
 
-def check_json(errors: list[str]) -> None:
-    for rel in REQUIRED_METADATA:
+def check_llm_links(errors: list[str]) -> None:
+    """Validate the GitHub-absolute links in the LLM discovery files.
+
+    ``llms.txt`` and ``llms-full.txt`` are served verbatim from the production
+    site, so their links must be absolute (a repository-relative link would
+    resolve against the site and 404). The absolute links point at this
+    repository; assert the referenced path actually exists, so a rename cannot
+    silently break the machine-readable entry points.
+    """
+    prefix = "https://github.com/itzebe/pact/blob/master/"
+    for rel in ("llms.txt", "llms-full.txt"):
         path = ROOT / rel
         if not path.exists():
-            errors.append(f"missing metadata file: {rel}")
+            continue
+        text = path.read_text()
+        for target in LINK.findall(text):
+            if not target.startswith(prefix):
+                continue
+            repo_path = target[len(prefix):].split("#", 1)[0]
+            if not (ROOT / repo_path).exists():
+                errors.append(f"broken repository link in {rel}: {repo_path}")
+
+
+def check_json(errors: list[str]) -> None:
+    # The root project.json is served verbatim from the production site, so a
+    # syntax error would ship an unparseable /project.json.
+    for rel in ["project.json"] + REQUIRED_METADATA:
+        path = ROOT / rel
+        if not path.exists():
+            if rel in REQUIRED_METADATA:
+                errors.append(f"missing metadata file: {rel}")
             continue
         try:
             json.loads(path.read_text())
@@ -162,6 +189,7 @@ def main() -> int:
     check_json(errors)
     check_required(errors)
     check_links(errors)
+    check_llm_links(errors)
     check_structure(errors)
 
     if errors:

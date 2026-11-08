@@ -19,9 +19,12 @@ no account to create.
 > **Documentation map.** This README is the public introduction. The canonical
 > technical documentation is in [`docs/`](docs/README.md), navigable from
 > [`docs/knowledge-map.md`](docs/knowledge-map.md). Machine-readable project metadata
-> is in [`metadata/`](metadata/project.json). For AI systems, start at
-> [`llms.txt`](llms.txt) (compact) or [`llms-full.txt`](llms-full.txt)
-> (consolidated). Agents editing this repository must read [`AGENTS.md`](AGENTS.md).
+> is in [`metadata/`](metadata/project.json). For AI systems and automated evaluators,
+> start at [`llms.txt`](llms.txt) (compact) or [`llms-full.txt`](llms-full.txt)
+> (consolidated); both are also served from the live site at
+> <https://pact-flame.vercel.app/llms.txt>, alongside structured facts at
+> <https://pact-flame.vercel.app/project.json> ([`project.json`](project.json)).
+> Agents editing this repository must read [`AGENTS.md`](AGENTS.md).
 >
 > - [Overview](docs/overview.md) · [Architecture](docs/architecture.md) · [Payment lifecycle](docs/payment-lifecycle.md)
 > - [Database](docs/database.md) · [Security](docs/security.md) · [AI system](docs/ai-system.md)
@@ -63,7 +66,8 @@ The reputation score then **feeds back into seller selection**: a seller with a 
 
 ### The payment invariants
 
-These are the guarantees that protect real money, and each is covered by a test:
+These are the guarantees that protect the money in the escrow flow (PayPal **Sandbox**
+in this demo), and each is covered by a test:
 
 - **Held means held.** A hold is recorded only when PayPal reports the authorization in a holdable state. `DENIED` is a failure; an authorization that is already `CAPTURED` is flagged for reconciliation, never treated as a success.
 - **Settled means paid.** A job is recorded as settled only when the capture status is `COMPLETED`. `PENDING`, `FAILED` and `DECLINED` are not settlement.

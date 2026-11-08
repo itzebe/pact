@@ -6,9 +6,44 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #34**
-(`fb69db8`, 2026-11-08), which records the PR #33 release; the latest **code release**
-is **PR #33** (`41958ab`, 2026-11-08), deployed to production at that commit.
+the `master` branch. The latest merge on `master` is **PR #38**
+(`79cecec`, 2026-11-08), which records the PR #36 beta-checklist release and the
+hackathon judging-readiness changes; the latest **code release** is **PR #33**
+(`41958ab`, 2026-11-08), deployed to production at that commit.
+
+## Unreleased — LLM discoverability and the machine-readable site surface
+
+Documentation, metadata and the site's machine-readable surface only; no application
+behaviour, payment flow, or configuration changed.
+
+### Added
+
+- A root [`project.json`](project.json): concise, structured, machine-readable
+  project facts (identity, problem, architecture, AI boundaries, PayPal integration,
+  security controls, limitations, and judging-criteria evidence) for AI evaluators
+  and automated indexing.
+- The production site now serves `/llms.txt`, `/llms-full.txt` and `/project.json`
+  (copied verbatim from the repository root at build time, so they cannot drift),
+  plus `/robots.txt` and `/sitemap.xml`.
+- `frontend/index.html` now carries a meta description, a canonical link, Open Graph
+  and Twitter cards, a `schema.org` `SoftwareApplication` JSON-LD block, and a
+  `<noscript>` fallback that restates the product explanation in plain HTML.
+- `frontend/test/machine-files.test.js` pins the crawler files, the structured data,
+  the no-JavaScript fallback, and the canonical-file copy.
+- `scripts/check_docs.py` now validates the GitHub-absolute links in `llms.txt` /
+  `llms-full.txt` and parses the root `project.json`.
+
+### Changed
+
+- `llms.txt` and `llms-full.txt` use GitHub-absolute links, so the same file reads
+  correctly on GitHub and when served from the live site.
+- The frontend suite grew from 52 to 58 tests; the recorded count was updated across
+  the docs and metadata.
+- Corrected a misleading phrase in the README ("protect real money" → the money in
+  the escrow flow, which is PayPal Sandbox in this demo).
+- [`docs/discoverability.md`](docs/discoverability.md) now records the applied
+  website-level surface and the owner actions (repository topics, Devpost copy) that
+  need a scope the agent token does not have.
 
 ## 2026-11-08 — PR #33: beta-readiness hardening, two release-blocking fixes, and documentation to the shipped state
 

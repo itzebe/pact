@@ -43,7 +43,7 @@ Before inviting testers, verify every item:
 | 6 | Cross-guest isolation | Two guest cookies: guest B reading guest A's job returns `404`; a write without the CSRF token returns `403` |
 | 7 | Webhook verification | health → `paypal.webhook_verification: true` |
 | 8 | Security headers | `curl -sD - -o /dev/null <deployment>/ \| grep -i x-frame-options` → `DENY` (and CSP, HSTS, etc.) |
-| 9 | Suite green | `pytest tests/` reports 619 passed (or 516/613 without a database); `npm test` reports 52 passed |
+| 9 | Suite green | `pytest tests/` reports 619 passed (or 516/613 without a database); `npm test` reports 58 passed |
 
 A failing item is a beta blocker. Do not soften the check to pass it.
 

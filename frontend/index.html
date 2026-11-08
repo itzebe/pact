@@ -3,13 +3,153 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pact — settlement infrastructure for the agent economy</title>
-    <meta name="description" content="Agents negotiate. Pact verifies. PayPal settles. Escrow-backed settlement infrastructure for autonomous commerce." />
+    <title>PACT — conditional settlement for the agent economy</title>
+    <meta
+      name="description"
+      content="PACT holds a buyer's funds in PayPal escrow before work starts and releases them only when an independent verifier confirms the delivery meets the acceptance criteria. Agents negotiate; Pact verifies; PayPal settles. PayPal Sandbox demo."
+    />
+    <link rel="canonical" href="https://pact-flame.vercel.app/" />
+
+    <!-- The canonical machine-readable facts are served at /project.json. -->
+    <link rel="alternate" type="application/json" href="/project.json" title="PACT project facts (JSON)" />
+    <link rel="llms" type="text/plain" href="/llms.txt" title="PACT for LLMs" />
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PACT" />
+    <meta property="og:title" content="PACT — conditional settlement for the agent economy" />
+    <meta
+      property="og:description"
+      content="Money moves only when an independent verifier confirms the delivery. PayPal holds the funds; Pact coordinates the conditional release. PayPal Sandbox demo."
+    />
+    <meta property="og:url" content="https://pact-flame.vercel.app/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="PACT — conditional settlement for the agent economy" />
+    <meta
+      name="twitter:description"
+      content="PayPal holds the funds; Pact releases them only when an independent verifier confirms the delivery. PayPal Sandbox demo."
+    />
+
     <link rel="preconnect" href="https://rsms.me/" />
     <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+
+    <!--
+      Structured data: describes the software project for search and AI systems.
+      Values are factual and mirror project.json and the README.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "PACT",
+        "alternateName": "Pact — conditional settlement infrastructure for the agent economy",
+        "applicationCategory": "FinanceApplication",
+        "applicationSubCategory": "Agent payments / escrow settlement",
+        "operatingSystem": "Web",
+        "description": "PACT is conditional settlement infrastructure for the agent economy. It holds a buyer's funds in PayPal escrow before work starts and releases them only when an independent verifier confirms the delivery meets the buyer's acceptance criteria. The deployed demo runs on the PayPal Sandbox host and moves no real money.",
+        "url": "https://pact-flame.vercel.app/",
+        "license": "https://github.com/itzebe/pact/blob/master/LICENSE",
+        "isAccessibleForFree": true,
+        "codeRepository": "https://github.com/itzebe/pact",
+        "programmingLanguage": ["Python", "JavaScript"],
+        "keywords": "escrow, PayPal, agent payments, conditional settlement, AI agents, verification, PostgreSQL, FastAPI",
+        "sameAs": [
+          "https://github.com/itzebe/pact",
+          "https://devpost.com/software/pact-verified-payments-for-ai-agents",
+          "https://www.youtube.com/watch?v=CMGsmqTr6FQ"
+        ],
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+          "description": "Public demo on the PayPal Sandbox; no real money moves."
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+
+    <!--
+      Fallback content for crawlers and users without JavaScript. It restates, in
+      plain HTML, the same product explanation the application renders, so the
+      initial response is meaningful on its own. It is not hidden from search or
+      AI systems and contains no information that is not also in the live app.
+    -->
+    <noscript>
+      <main>
+        <h1>PACT — conditional settlement for the agent economy</h1>
+        <p>
+          PACT is settlement infrastructure for work performed between autonomous
+          agents. Its single governing idea: <strong>payment follows verified
+          delivery.</strong> A buyer posts a job; seller agents negotiate a price;
+          PayPal holds the buyer's funds in escrow before any work starts; the
+          seller produces a deliverable; an independent verifier checks it against
+          the buyer's acceptance criteria; and the money is released (PayPal
+          <code>capture</code>) on a pass or returned (<code>void</code>) on a fail.
+          Every state transition is recorded in a SHA-256 hash-chained ledger.
+        </p>
+
+        <h2>The problem it solves</h2>
+        <p>
+          Two agents that do not trust each other cannot safely transact. If the
+          buyer pays first, the seller can take the money and not deliver; if the
+          seller delivers first, the buyer can refuse to pay. PACT uses a payment
+          primitive that already exists — a PayPal authorization that reserves the
+          buyer's funds and a two-way branch to capture or void — and adds the
+          coordination protocol and an independent verifier on top.
+        </p>
+
+        <h2>The transaction lifecycle</h2>
+        <ol>
+          <li>Post a job: brief, acceptance criteria, and a hard budget ceiling.</li>
+          <li>Negotiate: seller agents quote; the buyer counters; the price converges within the budget (enforced in code).</li>
+          <li>Hold: a PayPal order with <code>intent=AUTHORIZE</code>, approved by the buyer and then authorized.</li>
+          <li>Deliver: the selected seller agent produces the deliverable.</li>
+          <li>Verify: an independent verifier checks every acceptance criterion.</li>
+          <li>Settle: pass → <code>capture</code> (release); fail → <code>void</code> (return, buyer charged nothing).</li>
+          <li>Refund: a captured payment can be refunded in full or in part.</li>
+        </ol>
+
+        <h2>Why PayPal and AI are essential</h2>
+        <p>
+          PayPal supplies the escrow primitive on ordinary fiat rails: an
+          authorization that reserves funds, and a capture/void branch. AI supplies
+          the agents — a seller that quotes and delivers, a buyer that counters
+          within budget, and a verifier that judges the delivery against the
+          acceptance criteria. The AI proposes; it never authorizes. The settlement
+          engine decides whether money moves, and only the PayPal client moves it.
+        </p>
+
+        <h2>Payment safety</h2>
+        <p>
+          A hold is recorded only on a holdable authorization; a job is settled only
+          on a <code>COMPLETED</code> capture; a capture is claimed and serialised so
+          it happens at most once; an unknown outcome is left <code>unresolved</code>
+          for reconciliation rather than retried blindly; and a failed verification
+          never reaches the capture call. Webhooks are signature-verified and applied
+          at most once.
+        </p>
+
+        <h2>Sandbox only</h2>
+        <p>
+          The deployed demo runs on the <strong>PayPal Sandbox</strong> host and moves
+          no real money. PACT is not a custodian; PayPal holds the funds.
+        </p>
+
+        <h2>Try it and inspect it</h2>
+        <ul>
+          <li>Live demo (no account): <a href="https://pact-flame.vercel.app/">https://pact-flame.vercel.app/</a></li>
+          <li>Demo video (2:17): <a href="https://www.youtube.com/watch?v=CMGsmqTr6FQ">YouTube</a></li>
+          <li>Source code: <a href="https://github.com/itzebe/pact">github.com/itzebe/pact</a></li>
+          <li>Devpost: <a href="https://devpost.com/software/pact-verified-payments-for-ai-agents">devpost.com/software/pact-verified-payments-for-ai-agents</a></li>
+          <li>Machine-readable facts: <a href="/project.json">/project.json</a></li>
+          <li>For LLMs: <a href="/llms.txt">/llms.txt</a> and <a href="/llms-full.txt">/llms-full.txt</a></li>
+        </ul>
+        <p>This page requires JavaScript for the interactive demo.</p>
+      </main>
+    </noscript>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

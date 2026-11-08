@@ -63,8 +63,14 @@ If you are new to PACT, read in this order: [`overview.md`](overview.md) →
 ## Machine-readable index
 
 Structured metadata with source references lives at the repository root in
-[`metadata/`](../metadata/project.json):
+[`metadata/`](../metadata/project.json). For AI systems and automated evaluators the
+machine-readable entry points are [`llms.txt`](../llms.txt) (compact),
+[`llms-full.txt`](../llms-full.txt) (consolidated), and [`project.json`](../project.json)
+(concise structured facts); all three are also served from the live site. The
+discovery surface is documented in [`discoverability.md`](discoverability.md).
 
+- [`project.json`](../project.json) — compact structured facts (identity, problem,
+  architecture, AI boundaries, security, limitations), also served at `/project.json`.
 - [`metadata/project.json`](../metadata/project.json) — identity, stack, status.
 - [`metadata/features.json`](../metadata/features.json) — feature inventory.
 - [`metadata/api.json`](../metadata/api.json) — endpoint inventory.
@@ -78,8 +84,10 @@ Structured metadata with source references lives at the repository root in
 The documentation is validated in CI by
 [`.github/workflows/docs.yml`](../.github/workflows/docs.yml):
 
-- every JSON file under `metadata/` parses;
+- every JSON file under `metadata/` (and the root `project.json`) parses;
 - every relative Markdown link resolves to a file that exists;
+- every GitHub-absolute link in `llms.txt` / `llms-full.txt` resolves to a real
+  repository path;
 - the required root documentation files are present;
 - the required `docs/` files are present.
 

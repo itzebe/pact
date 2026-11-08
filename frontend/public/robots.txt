@@ -1,0 +1,12 @@
+# PACT — robots.txt
+# The public project pages and the LLM discovery resources are open to crawlers.
+# The JSON API is left to the application; /api/ holds no indexable content and
+# some of it is session- and payment-scoped, so crawlers are asked to skip it.
+# Nothing here is a security control: authentication and authorization are
+# enforced by the application, not by robots.txt.
+
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://pact-flame.vercel.app/sitemap.xml
