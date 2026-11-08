@@ -1,7 +1,7 @@
 {
   "schema_note": "Verification evidence for PACT: what was run, where, and with what result. Counts are real results from commands executed while writing this documentation (2026-11-07). A skip is not a pass; skipped tests and their reason are recorded.",
   "verification_date": "2026-11-07",
-  "verified_commit": "4ce1faf",
+  "verified_commit": "f1e146b",
   "environment": {
     "python": "3.11.17",
     "node": "24.22.1",
@@ -78,8 +78,8 @@
   "production_metadata": {
     "repo": "https://github.com/itzebe/pact",
     "default_branch": "master",
-    "latest_master_commit": "4ce1faf",
-    "merged_pull_requests": 25,
+    "latest_master_commit": "f1e146b",
+    "merged_pull_requests": 30,
     "open_pull_requests": 0,
     "github_topics_before": [],
     "license": "MIT"

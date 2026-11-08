@@ -6,10 +6,10 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #29**
-(`3dceab6`, 2026-11-07).
+the `master` branch. The latest merge on `master` is **PR #30**
+(`f1e146b`, 2026-11-07).
 
-## [Unreleased]
+## 2026-11-07 — PR #30: health reports the resolved PayPal environment (`is_live`)
 
 ### Changed — health reports the resolved PayPal environment (`is_live`)
 
@@ -27,7 +27,30 @@ the `master` branch. The latest merge on `master` is **PR #29**
   `docs/security.md`, `docs/faq.md`, `docs/deployment.md`. Regression coverage added in
   `tests/test_paypal_sandbox_config.py`.
 
-### Added — canonical documentation system (this change)
+## 2026-11-07 — PR #29: wire the `PACT_PG_*` pool settings into `get_pool`
+
+### Fixed
+- `PACT_PG_POOL_MAX_SIZE`/`MIN_SIZE`/`TIMEOUT_SECONDS`/`MAX_IDLE_SECONDS` and
+  `PACT_PG_STATEMENT_TIMEOUT_MS` were defined but never passed to the pool.
+  `get_pool` now forwards them, an explicit kwarg overrides a setting, and
+  `validate_runtime` rejects a value the driver would refuse.
+
+## 2026-11-07 — PR #28: fix psycopg3 prepared-statement race
+
+### Fixed
+- A psycopg3 prepared-statement race behind a transaction-mode pooler
+  (PgBouncer/Neon `-pooler`), where a named statement prepared on one pooled
+  connection was re-used on another.
+
+## 2026-11-07 — PR #27: fix WCAG 2.2 AA defects
+
+### Fixed
+- Contrast on `paper.faint` (`#6b7488` → `#9099ab`) and several sub-24 px tap targets.
+- Added first-run orientation for the guest experience.
+
+## 2026-11-07 — PR #26: canonical documentation system
+
+### Added — canonical documentation system
 
 - Root `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`, `llms.txt`,
   `llms-full.txt`.
