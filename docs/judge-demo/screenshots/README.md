@@ -28,10 +28,14 @@ flow. None are illustrations, mockups, or recreated interfaces.
 
 ## What each capture proves — and what it does not
 
-- The captures are of the **running production deployment**, at commit `46fa3b5e`
-  (`dpl_CqWUFB6wnotWgD8MwQGVRf7nwpEY`).
+- Most captures are of the **running production deployment** at commit `46fa3b5e`
+  (`dpl_CqWUFB6wnotWgD8MwQGVRf7nwpEY`). The two first-screen images (`01` desktop and
+  `09` mobile) were **re-captured on 2026-11-08** from the current production
+  deployment, because a first-run welcome block was added to the workspace after
+  `46fa3b5e`. The re-capture is the same live URL and the same viewports; only the
+  static first screen was refreshed, so no interactive Sandbox state is implied by it.
 - The settled state in `06`, `07` and `08` was produced by a **real** Sandbox run
-  during this capture session: a real order was created, approved in the PayPal
+  during the original capture session: a real order was created, approved in the PayPal
   Sandbox checkout, authorized, captured, and then refunded. The identifiers for
   the specific journey in the original verification report are preserved in
   [`../PRESERVED_VERIFICATION_EVIDENCE.md`](../PRESERVED_VERIFICATION_EVIDENCE.md).

@@ -10,8 +10,8 @@
 | **Final narrated demo (this mission)** | ✅ [`pact-demo-final-narrated.mp4`](pact-demo-final-narrated.mp4) — **2:17**, 1600×900, H.264 + AAC, narrated (synthesized voice, `edge-tts`), burned captions, credential-free |
 | Earlier narrated demo | ✅ [`../demo/pact-demo-final.mp4`](../demo/pact-demo-final.mp4) — 2:52, predates the guest experience and refunds |
 | Silent walkthrough (evidence) | ✅ [`pact-walkthrough-silent.mp4`](pact-walkthrough-silent.mp4) — 0:58, no narration |
-| Uploaded to YouTube (public) | ⏳ Owner action (needs the owner's channel) |
-| Link added to the Devpost form | ⏳ Owner action (submitting to Devpost requires owner approval) |
+| Uploaded to YouTube (public) | ✅ <https://www.youtube.com/watch?v=CMGsmqTr6FQ> — "PACT — Agreements You Can Verify \| PayPal AI Hackathon 2026", 2:17 |
+| Link added to the Devpost form | ⏳ Owner action (the video is already embedded on the public Devpost page; confirming the form field is an owner action) |
 
 ### The final narrated demo
 
@@ -69,20 +69,23 @@ Both scripts are committed under `docs/judge-demo/tools/`.
 - [x] On-screen capture/settlement state is the one the visible job produced.
 - [x] Exported MP4 (H.264, AAC), 1600×900, 6.3 MB, `+faststart`.
 
-## Upload — owner action ⏳
+## Upload — done ✅
 
-- [ ] Upload `pact-demo-final-narrated.mp4` to YouTube, visibility **Public**.
-- [ ] Title: `Pact — verifiable escrow for agent work (PayPal Sandbox demo)`.
-- [ ] Add the YouTube link to the Devpost submission form.
-- [ ] Confirm the link resolves in an incognito window.
+The final cut is **public on YouTube** and embedded on the Devpost page:
+
+- [x] Uploaded to YouTube, visibility **Public**:
+      <https://www.youtube.com/watch?v=CMGsmqTr6FQ>
+- [x] Actual title on YouTube: `PACT — Agreements You Can Verify | PayPal AI Hackathon 2026`
+- [x] Duration **2:17** (under 3:00); verified public via the YouTube oEmbed API.
+- [x] Embedded on <https://devpost.com/software/pact-verified-payments-for-ai-agents>.
 
 ## Owner-only actions
 
 1. Optionally re-record the narration in your own voice (the current cut uses synthesized
    narration). The script and timings are in this folder.
-2. Upload to the owner's YouTube channel.
-3. Paste the link into Devpost.
-4. Click **Submit** on Devpost (explicit owner authorization required).
+2. Confirm the video URL is present in the Devpost submission **form** field (the public
+   page already embeds it).
+3. Click **Submit** on Devpost (explicit owner authorization required).
 
 ## Reproducing the final recording
 

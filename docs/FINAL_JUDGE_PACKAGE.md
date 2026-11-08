@@ -6,6 +6,10 @@ understand, run, and verify PACT is linked from here.
 **Repository:** <https://github.com/itzebe/pact> · **Live product:**
 <https://pact-flame.vercel.app> · **License:** MIT · **Payment environment:** PayPal **Sandbox**
 
+**Watch the demo (2:17):** <https://www.youtube.com/watch?v=CMGsmqTr6FQ> — the full
+lifecycle end to end, on a real PayPal Sandbox run. **Try it (no account):**
+<https://pact-flame.vercel.app>.
+
 ---
 
 ## 1. What PACT is
@@ -26,9 +30,10 @@ of every step. A judge can use the whole thing without an account.
 | 4 | [`judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md`](judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md) | Provider ids, test results, CI — fresh vs historical |
 | 5 | [`HACKATHON_SUBMISSION.md`](HACKATHON_SUBMISSION.md) | The submission copy |
 | 6 | [`JUDGING_STRATEGY.md`](JUDGING_STRATEGY.md) | Rubric mapping and competitive positioning |
-| 7 | [`TOPOLOGY.md`](TOPOLOGY.md) | Architecture / topology |
-| 8 | [`judge-demo/FINAL_VIDEO_SCRIPT.md`](judge-demo/FINAL_VIDEO_SCRIPT.md) | Demo video script (+ storyboard, transcript, checklist) |
-| 9 | [`judge-demo/CLEANUP_REPORT.md`](judge-demo/CLEANUP_REPORT.md) | Why verification records were preserved |
+| 7 | [`devpost-submission-copy.md`](devpost-submission-copy.md) | The Devpost-form revision (owner applies it) |
+| 8 | [`TOPOLOGY.md`](TOPOLOGY.md) | Architecture / topology |
+| 9 | [`judge-demo/FINAL_VIDEO_SCRIPT.md`](judge-demo/FINAL_VIDEO_SCRIPT.md) | Demo video script (+ storyboard, transcript, checklist) |
+| 10 | [`judge-demo/CLEANUP_REPORT.md`](judge-demo/CLEANUP_REPORT.md) | Why verification records were preserved |
 
 **Architecture note.** There is no separate `ARCHITECTURE.md`; [`TOPOLOGY.md`](TOPOLOGY.md)
 is the architecture document, and the README carries the component overview. There is no
@@ -127,14 +132,15 @@ network boundary stubbed, plus API contract tests against the live FastAPI app.
 ## 6. Honest limitations
 
 - **Sandbox only.** The demo never implies real payments.
-- **Demo videos.** The **final narrated cut** is
-  [`judge-demo/pact-demo-final-narrated.mp4`](judge-demo/pact-demo-final-narrated.mp4)
-  (2:17, synthesized narration, burned captions, PayPal-Sandbox labelled). A silent
-  walkthrough of the same flow is
+- **Demo videos.** The **final narrated cut** is public on YouTube:
+  <https://www.youtube.com/watch?v=CMGsmqTr6FQ> (2:17, synthesized narration, burned
+  captions, PayPal-Sandbox labelled). The same cut is in the repository at
+  [`judge-demo/pact-demo-final-narrated.mp4`](judge-demo/pact-demo-final-narrated.mp4).
+  A silent walkthrough of the same flow is
   [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4)
   (0:58). An earlier narrated demo, [`demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4)
-  (2:52), predates the guest experience and refunds. The **YouTube upload and the Devpost
-  submission are owner actions.** See
+  (2:52), predates the guest experience and refunds. The **Devpost submission** remains an
+  owner action. See
   [`judge-demo/FINAL_VIDEO_CHECKLIST.md`](judge-demo/FINAL_VIDEO_CHECKLIST.md).
 - **Verification is model-backed** and can occasionally fail a run (which correctly voids
   the hold).
