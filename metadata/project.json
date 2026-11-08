@@ -14,8 +14,8 @@
     "license": "MIT",
     "language": "Python",
     "visibility": "public",
-    "latest_known_master_commit": "530ced6",
-    "latest_known_master_pr": 32,
+    "latest_known_master_commit": "41958ab",
+    "latest_known_master_pr": 33,
     "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time."
   },
   "production": {
@@ -24,7 +24,7 @@
     "hosting": "Vercel",
     "database": "PostgreSQL (Neon-compatible)",
     "payment_environment": "PayPal Sandbox",
-    "verified_at": "2026-11-07",
+    "verified_at": "2026-11-08",
     "verified_health": {
       "status": "ok",
       "paypal_mode": "sandbox",
@@ -38,21 +38,53 @@
     }
   },
   "stack": {
-    "backend": ["Python 3.11", "FastAPI", "Pydantic v2", "sse-starlette", "httpx", "PyJWT", "argon2-cffi"],
-    "frontend": ["React 18", "Vite 6", "Tailwind CSS 3", "AG Grid Community"],
-    "database": ["PostgreSQL", "psycopg3", "psycopg_pool"],
-    "payments": ["PayPal Orders v2", "PayPal Payments v2"],
-    "ai": ["OpenAI-compatible chat completions", "Groq openai/gpt-oss-20b (deployed demo)"],
-    "hosting": ["Vercel", "Docker", "Render (config present)"],
-    "ci": ["GitHub Actions"]
+    "backend": [
+      "Python 3.11",
+      "FastAPI",
+      "Pydantic v2",
+      "sse-starlette",
+      "httpx",
+      "PyJWT",
+      "argon2-cffi"
+    ],
+    "frontend": [
+      "React 18",
+      "Vite 6",
+      "Tailwind CSS 3",
+      "AG Grid Community"
+    ],
+    "database": [
+      "PostgreSQL",
+      "psycopg3",
+      "psycopg_pool"
+    ],
+    "payments": [
+      "PayPal Orders v2",
+      "PayPal Payments v2"
+    ],
+    "ai": [
+      "OpenAI-compatible chat completions",
+      "Groq openai/gpt-oss-20b (deployed demo)"
+    ],
+    "hosting": [
+      "Vercel",
+      "Docker",
+      "Render (config present)"
+    ],
+    "ci": [
+      "GitHub Actions"
+    ]
   },
   "documentation": {
     "version": "1.0.0",
     "index": "docs/README.md",
     "knowledge_map": "docs/knowledge-map.md",
-    "llm_discovery": ["llms.txt", "llms-full.txt"],
+    "llm_discovery": [
+      "llms.txt",
+      "llms-full.txt"
+    ],
     "agent_instructions": "AGENTS.md",
-    "last_verified_commit": "530ced6",
+    "last_verified_commit": "41958ab",
     "last_verified_date": "2026-11-08"
   },
   "status_vocabulary": [
