@@ -139,11 +139,38 @@ verifies the endpoint with a live probe and refuses one that behaves like a pool
   discarded. Deletion is a soft-delete tombstone set only once the escrow is terminal.
 
 **Backup and restore.** The ledger is the record of truth for money movement, so a beta
-must have provider-level backups enabled (automated backups / point-in-time recovery on
-the managed database). Verify this in the provider's console before inviting testers;
-PACT does not take its own backups. A restore is a provider operation, not an application
-one — after any restore, re-check health and reconcile any job that was `unresolved` at
-the time of the incident.
+must have a working recovery path. PACT does not take its own backups; recovery is a
+provider operation.
+
+Production runs on **Neon** (serverless PostgreSQL). Neon's *instant restore* — also
+called point-in-time restore (PITR) — is a **built-in capability included on the Free
+plan**, not a paid add-on: it retains a continuous history of changes for a **6-hour
+window on the Free plan** (7 days on Launch, 30 days on Scale). Within that window you
+can restore to any moment without any traditional backup automation. See Neon's
+[Backups](https://neon.com/docs/manage/backups) and
+[Instant restore](https://neon.com/docs/introduction/point-in-time-restore) documentation.
+
+- **What this covers:** an accidental `DELETE`/`UPDATE`, a bad migration, or data
+  corruption within the last 6 hours.
+- **What it does not cover:** anything older than the history window, and loss of the
+  whole Neon project/account. The 6-hour window is the binding limit of the free plan.
+- **Longer retention (optional, still free):** a scheduled `pg_dump` to external object
+  storage extends retention beyond 6 hours. Neon documents an S3 + GitHub Actions recipe;
+  a free-tier object store works as the target. This is a complement to PITR, not a
+  replacement.
+
+**Restoring safely.** Never restore over the production branch. A Neon restore creates a
+**new branch** (copy-on-write, so it costs no extra storage until it diverges), which can
+be inspected and then promoted or discarded — production is untouched until you choose to
+promote. After any restore or promotion:
+
+1. Re-check `/api/health` (`status: ok`, `storage.durable: true`).
+2. Reconcile any job that was `unresolved` at the time of the incident (§5).
+3. Re-verify the hash chain on the affected jobs.
+
+Verify the exact history window and a working restore on **your** Neon project in the Neon
+console before inviting testers. Do not treat the existence of PITR as proof that a restore
+succeeds — exercise it against a throwaway branch.
 
 ## 7. Incident response
 
@@ -173,7 +200,9 @@ considerations.
   production payment relationship.
 - **No operator console.** Reconciliation and token minting are CLI/API operations
   (`scripts/issue_token.py`, the `reconcile` route), not a UI.
-- **No self-managed backups.** Backup/restore is delegated to the database provider.
+- **No self-managed backups.** Recovery is delegated to the provider: Neon's built-in
+  instant restore (PITR) on the Free plan, with a 6-hour history window (§6). Extending
+  retention beyond 6 hours needs a scheduled `pg_dump` you configure.
 - **No email delivery guarantee.** The email outbox exists, but delivery depends on an
   operator-configured provider.
 - **The AI verifier is assistive.** It produces a verdict and evidence; it never

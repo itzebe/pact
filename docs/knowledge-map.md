@@ -91,6 +91,7 @@ flowchart TB
 |---|---|
 | Vercel, Postgres, environment, verification | [`deployment.md`](deployment.md) |
 | Running a controlled beta | [`beta-operations.md`](beta-operations.md) |
+| Controlled-beta launch plan | [`beta-launch-checklist.md`](beta-launch-checklist.md) |
 | Multi-instance guarantees | [`TOPOLOGY.md`](TOPOLOGY.md) |
 
 ## Source-code entry points
