@@ -35,6 +35,17 @@ process-local counter is exactly as strong; the response says which one is in us
 (``X-RateLimit-Scope``) rather than implying a distributed guarantee it does not
 have.
 
+The shared counter is serialised
+--------------------------------
+Counting the window and recording the request are two statements. Two instances
+evaluating the same identity at once would both read an under-limit count and both
+record — a write skew that lets a burst exceed the limit by the number of racing
+instances. ``check`` takes a transaction-scoped advisory lock keyed on
+``(scope, key)`` before counting, so the count-then-record pair is atomic per
+identity across instances. The lock is released when the transaction commits, so
+it cannot leak, and it lives on the caller's transaction so it also holds through
+a transaction-mode pooler.
+
 Failure is closed
 -----------------
 If a shared store is configured but cannot be reached, the request is refused
@@ -115,6 +126,13 @@ _COUNT_SQL = """
 SELECT count(*), min(at) FROM rate_limit_events
 WHERE scope = %s AND key = %s AND at > now() - make_interval(secs => %s)
 """
+
+#: Serialise the count-then-insert for one (scope, key) so two instances racing the
+#: same identity cannot both read an under-limit count and both insert (a write
+#: skew that would let a burst exceed the limit). The lock is transaction-scoped, so
+#: it is released when ``check`` commits; it is taken on the caller's own
+#: transaction, so it also holds through a transaction-mode pooler.
+_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))"
 
 _RECORD_SQL = "INSERT INTO rate_limit_events (scope, key) VALUES (%s, %s)"
 
@@ -206,6 +224,9 @@ class PostgresRateLimiter:
         """
         try:
             with self._pool.connection() as conn, conn.cursor() as cur:
+                # Serialise this (scope, key) before counting, so a concurrent check
+                # on another instance cannot interleave between our count and insert.
+                cur.execute(_LOCK_SQL, (f"{scope}:{key}",))
                 cur.execute(_COUNT_SQL, (scope, key, rule.window_seconds))
                 count, oldest = cur.fetchone()
                 count = int(count)

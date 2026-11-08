@@ -193,6 +193,12 @@ criteria, non-finite budget).
   single-instance by construction and a process-local counter is exactly as strong;
   `GET /api/health` reports which one is in use (`rate_limit.scope`), so the response
   never implies a distributed guarantee it does not have.
+- The shared counter is **serialised per identity**: `check` takes a
+  transaction-scoped advisory lock on `(scope, key)` before counting, so two instances
+  evaluating the same identity at once cannot both read an under-limit count and both
+  record. Without this the limit could be exceeded by the number of racing instances.
+  A concurrency test (`test_two_instances_racing_allow_exactly_the_limit`) pins the
+  invariant against real PostgreSQL.
 - A configured-but-unreachable shared store **refuses** every money-route request
   rather than serving unbounded, because the failure mode of a money route must be
   "do not call the provider".
