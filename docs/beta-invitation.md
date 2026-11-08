@@ -57,14 +57,16 @@ should get a **404**, not their data.
 
 ## How to report a problem
 
-Report **every** problem, even small ones, through the channel the operator gave you:
+Report **every** problem, even small ones, through the **private Google Form** the operator
+sent you:
 
 - **Say what you did, what you expected, and what happened.** Include the approximate time
   (UTC) and the job id if you have one.
-- **Do not** post the sandbox buyer password, any real credential, real financial
-  information, personal data, or a full transaction id in any public place.
-- A payment problem (a capture or refund that looks wrong, or a job stuck) is urgent — mark
-  it as urgent so the operator sees it first.
+- **Do not** submit the sandbox buyer password, any real credential, real financial
+  information, personal data, or a full transaction id.
+- A payment problem (a capture or refund that looks wrong, or a job stuck) is urgent — set
+  severity to **Critical** in the form **and** tell the operator through the private channel
+  they gave you, so it is seen first.
 
 ## What not to submit
 
@@ -75,8 +77,12 @@ Report **every** problem, even small ones, through the channel the operator gave
 
 ## Contact
 
-Use the reporting channel the operator provides:
-`<channel to be set by the operator>`.
+Report ordinary problems through the **private Google Form** the operator sends you. The
+form is not linked here on purpose — the operator shares the link directly with each tester.
+Do not post the link publicly.
+
+For anything that looks like a **security vulnerability** (not ordinary feedback), use the
+security channel in [`SECURITY.md`](../SECURITY.md) instead.
 
 Thank you for helping test PACT. Your reports directly shape what ships.
 
