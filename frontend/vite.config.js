@@ -18,12 +18,20 @@ const target = process.env.VITE_API_PROXY || 'http://localhost:8000'
 const CANONICAL_FILES = ['llms.txt', 'llms-full.txt', 'project.json']
 
 function serveCanonicalMachineFiles() {
-  const readCanonical = (name) => {
-    const source = join(repoRoot, name)
-    if (!existsSync(source)) {
-      throw new Error(`canonical ${name} not found at ${source}`)
+  // The files live at the repository root in a checkout. In the Docker image the
+  // frontend is built in an isolated `/web` directory with the three files copied
+  // in beside it, so accept either location and use the first that has them all.
+  const candidateRoots = [repoRoot, here]
+  const resolveRoot = () => {
+    for (const root of candidateRoots) {
+      if (CANONICAL_FILES.every((name) => existsSync(join(root, name)))) return root
     }
-    const text = readFileSync(source, 'utf8')
+    throw new Error(
+      `canonical machine files (${CANONICAL_FILES.join(', ')}) were not found in ${candidateRoots.join(' or ')}`,
+    )
+  }
+  const readCanonical = (name) => {
+    const text = readFileSync(join(resolveRoot(), name), 'utf8')
     // Parse the JSON now so a malformed canonical file fails the build rather
     // than shipping an unparseable /project.json.
     if (name.endsWith('.json')) JSON.parse(text)
@@ -50,9 +58,10 @@ function serveCanonicalMachineFiles() {
     // Build: copy each canonical file into the output verbatim.
     writeBundle(options) {
       const outDir = options.dir || join(here, 'dist')
+      const root = resolveRoot()
       mkdirSync(outDir, { recursive: true })
       for (const name of CANONICAL_FILES) {
-        cpSync(join(repoRoot, name), join(outDir, name))
+        cpSync(join(root, name), join(outDir, name))
       }
     },
   }

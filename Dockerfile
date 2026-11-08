@@ -6,6 +6,10 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install --no-audit --no-fund
 COPY frontend/ ./
+# The canonical machine files live at the repository root; the build copies them
+# into the output as /llms.txt, /llms-full.txt and /project.json (see
+# frontend/vite.config.js). They must sit beside the build for that to work.
+COPY llms.txt llms-full.txt project.json ./
 RUN npm run build
 
 FROM python:3.11-slim
