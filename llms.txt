@@ -14,8 +14,7 @@ index is [`docs/README.md`](https://github.com/itzebe/pact/blob/master/docs/READ
 [`docs/knowledge-map.md`](https://github.com/itzebe/pact/blob/master/docs/knowledge-map.md).
 
 This file is served verbatim at <https://pact-flame.vercel.app/llms.txt>; the links
-below are repository-relative so they resolve on GitHub, and each is also reachable
-from the live site.
+below are GitHub-absolute so they resolve both on GitHub and from the live site.
 
 - **Repository:** https://github.com/itzebe/pact
 - **Live application:** https://pact-flame.vercel.app/

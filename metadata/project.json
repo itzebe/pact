@@ -14,11 +14,11 @@
     "license": "MIT",
     "language": "Python",
     "visibility": "public",
-    "latest_known_master_commit": "79cecec",
-    "latest_known_master_pr": 38,
+    "latest_known_master_commit": "b6648f2",
+    "latest_known_master_pr": 39,
     "latest_code_release_commit": "41958ab",
     "latest_code_release_pr": 33,
-    "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time."
+    "shallow_history_note": "The workspace clone was shallow; commit and PR facts were verified via the GitHub API at documentation time. latest_code_release_* tracks the last merge that changed application code (backend/ or frontend/src/); PRs #35, #36 and #38 were documentation-only and PR #39 changed the site build and machine-readable surface only, so the application code release remains PR #33."
   },
   "production": {
     "url": "https://pact-flame.vercel.app/",
@@ -86,7 +86,7 @@
       "llms-full.txt"
     ],
     "agent_instructions": "AGENTS.md",
-    "last_verified_commit": "79cecec",
+    "last_verified_commit": "b6648f2",
     "last_verified_date": "2026-11-08",
     "note": "last_verified_commit is the master commit at which this documentation set was last reviewed. Test-suite counts are recorded separately in metadata/evidence.json against the commit where they were actually run."
   },

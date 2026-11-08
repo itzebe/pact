@@ -6,15 +6,20 @@ grouped by the pull request that delivered them, newest first, so each change is
 traceable to the code and the review that produced it.
 
 PACT has no tagged releases yet. Versions below are the pull-request milestones on
-the `master` branch. The latest merge on `master` is **PR #38**
-(`79cecec`, 2026-11-08), which records the PR #36 beta-checklist release and the
-hackathon judging-readiness changes; the latest **code release** is **PR #33**
-(`41958ab`, 2026-11-08), deployed to production at that commit.
+the `master` branch. The latest merge on `master` is **PR #39**
+(`b6648f2`, 2026-11-08), the LLM-discoverability and machine-readable site surface,
+deployed to production. The latest **application code** release is **PR #33**
+(`41958ab`, 2026-11-08), deployed to production at that commit (PRs #35, #36 and #38
+were documentation-only and PR #39 changed the site build and machine-readable
+surface only).
 
-## Unreleased — LLM discoverability and the machine-readable site surface
+## 2026-11-08 — PR #39: LLM discoverability and the machine-readable site surface
 
 Documentation, metadata and the site's machine-readable surface only; no application
-behaviour, payment flow, or configuration changed.
+behaviour, payment flow, or configuration changed. Deployed to production at
+`b6648f2`; the live alias serves `/llms.txt` and `/llms-full.txt` as `text/plain`,
+`/project.json` as `application/json`, and `/robots.txt` and `/sitemap.xml`, all
+byte-identical to the repository versions.
 
 ### Added
 

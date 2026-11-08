@@ -100,6 +100,16 @@ without JavaScript. `frontend/test/machine-files.test.js` pins all of this.
   [`devpost-submission-copy.md`](devpost-submission-copy.md) and must be applied by
   the owner, who holds the Devpost account.
 
+## Production status
+
+The machine-readable surface is deployed and verified on production. On 2026-11-08
+commit `b6648f2` was deployed to production (deployment
+`dpl_8tnCJiqzqwWNbv1bMSpECg8pwNDq`, state READY) and the live alias serves
+`/llms.txt` and `/llms-full.txt` as `text/plain`, `/project.json` as
+`application/json`, and `/robots.txt` and `/sitemap.xml` — each byte-identical to the
+repository version. This is a serving/discoverability fact, not an indexing claim: no
+system is asserted to have indexed or cited PACT.
+
 ### Recommended topics
 
 ```

@@ -123,11 +123,14 @@
   "production_metadata": {
     "repo": "https://github.com/itzebe/pact",
     "default_branch": "master",
-    "latest_master_commit": "79cecec",
-    "latest_master_pr": 38,
+    "latest_master_commit": "b6648f2",
+    "latest_master_pr": 39,
     "latest_code_release_commit": "41958ab",
     "latest_code_release_pr": 33,
-    "merged_pull_requests": 37,
+    "latest_production_deployment_commit": "b6648f2",
+    "latest_production_deployment_id": "dpl_8tnCJiqzqwWNbv1bMSpECg8pwNDq",
+    "latest_production_deployed_at": "2026-11-08",
+    "merged_pull_requests": 38,
     "open_pull_requests": 1,
     "github_topics_before": [],
     "license": "MIT"
