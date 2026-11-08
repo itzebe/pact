@@ -93,6 +93,7 @@ flowchart TB
 | Running a controlled beta | [`beta-operations.md`](beta-operations.md) |
 | Controlled-beta launch plan | [`beta-launch-checklist.md`](beta-launch-checklist.md) |
 | Tester invitation text | [`beta-invitation.md`](beta-invitation.md) |
+| Feedback form specification | [`beta-feedback-form-spec.md`](beta-feedback-form-spec.md) |
 | Multi-instance guarantees | [`TOPOLOGY.md`](TOPOLOGY.md) |
 
 ## Source-code entry points

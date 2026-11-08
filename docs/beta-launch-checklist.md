@@ -94,17 +94,24 @@ Give these to every tester, in addition to the onboarding script (§3):
 
 ## 6. How testers report problems
 
-- **Where:** a single private channel the operator controls. **No safe channel exists yet** —
-  the repository is public, so a GitHub issue would publish the report, and GitHub Private
-  Vulnerability Reporting is disabled on the repository. See the proposal in §11. Until the
-  operator sets a channel, the destination here is a placeholder:
-  `<channel to be set by the operator>`.
+- **Where (ordinary feedback):** a **private Google Form**, "PACT Controlled Beta Feedback".
+  The exact form definition and the settings that keep responses private are in
+  [`beta-feedback-form-spec.md`](beta-feedback-form-spec.md). No Google session was available
+  when this was written, so the form has **not** been created and **no link is recorded here**.
+  The operator creates it, then sets the destination link in this section before inviting
+  testers — do not publish the link.
+- **Where (security vulnerability):** **not** the form. See [`SECURITY.md`](../SECURITY.md).
+  The preferred private route is GitHub **Private Vulnerability Reporting**, which is
+  **currently disabled** and must be enabled by an operator (§11).
 - **What to include:** what you did, what you expected, what happened, the approximate time
   (UTC), and the job id if there is one.
-- **What never to submit anywhere public:** the sandbox buyer password, any real credential,
-  real financial information, personal data, or a full transaction/authorization id.
+- **Privacy restrictions:** never submit the sandbox buyer password, any real credential,
+  real financial information, personal data, or a full transaction/authorization id. The form
+  does not collect email addresses and does not show a response summary to respondents, so
+  responses are visible only to the operator.
 - **Escalation:** any money-path problem (authorization, capture, refund, `unresolved` state)
-  is escalated to the operator immediately and handled as an incident (§10).
+  is marked **Critical** in the form and raised through the private channel the tester was
+  given, so the operator sees it immediately; it is handled as an incident (§10).
 
 ## 7. Operator monitoring
 
@@ -164,27 +171,27 @@ How to pause:
 3. Record what happened, the affected job ids, and the timeline.
 4. Fix on a branch, verify, and only then resume. Do not patch production directly.
 
-## 11. Reporting-channel proposal (operator decision required)
+## 11. Feedback and security channels
 
-No suitable private channel currently exists:
+**Ordinary beta feedback** uses a **private Google Form** as the default channel. The form
+definition and privacy settings are specified in
+[`beta-feedback-form-spec.md`](beta-feedback-form-spec.md). It is **not yet created** (no
+Google session was available when this was written), so no link is recorded anywhere. The
+operator creates it and sets the link in §6 before inviting testers.
 
-- The repository is **public**, so a GitHub issue would publish tester reports, job ids, and
-  any accidental personal data.
-- GitHub **Private Vulnerability Reporting is disabled** on the repository.
-- [`SECURITY.md`](../SECURITY.md) routes security issues to the maintainer's GitHub profile
-  email, which is fine for a coordinated security disclosure but is not a lightweight channel
-  for everyday beta feedback.
+**Security vulnerabilities** use a separate channel, never the form:
 
-Smallest practical options (the operator picks one; nothing is created here):
+- The repository is **public**, so a GitHub issue would publish a security report.
+- GitHub **Private Vulnerability Reporting is currently disabled** on the repository, and
+  enabling it via the API is refused for this automation's token (`403 Resource not
+  accessible by integration`). An operator must enable it in repository
+  **Settings → Security → Private vulnerability reporting**.
+- Until then, [`SECURITY.md`](../SECURITY.md) routes a security report to the maintainer's
+  GitHub profile email — acceptable for a coordinated disclosure, but a repository-native
+  private route is preferred.
 
-1. **Enable GitHub Private Vulnerability Reporting** (repository Settings → Security →
-   Private vulnerability reporting). Free, private, already tied to the repo.
-2. **A private channel the operator already runs** (a private chat, forum, or DM). Simplest,
-   and keeps reports off GitHub entirely. Set the destination in §6.
-3. **A dedicated private inbox** for beta feedback, separate from the security address.
-
-**Recommendation:** option 2 for day-to-day feedback, plus option 1 for anything that looks
-like a security issue. The operator must set the destination in §6 before inviting testers.
+**Operator actions before inviting testers:** create the form from the spec and set its link
+in §6; optionally enable Private Vulnerability Reporting for security reports.
 
 ## 12. Launch materials prepared (for review only)
 
