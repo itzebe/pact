@@ -33,17 +33,23 @@ The machine-readable version is [`metadata/evidence.json`](../../metadata/eviden
 | 2026-11-08 | Rate limit the money-bearing routes per identity | PR #32 (`530ced6`) |
 | 2026-11-08 | Beta-readiness: hardening headers, `/api` 404 fix, deterministic refund test | PR #33 (`41958ab`) |
 | 2026-11-08 | Record the PR #33 release and production verification (documentation) | PR #34 (`fb69db8`) |
+| 2026-11-08 | Beta-operations runbook and controlled-beta launch checklist (documentation) | PR #35 (`075c944`) |
+| 2026-11-08 | Finalize controlled-beta checklist and tester invitation package (documentation) | PR #36 (`aff9d53`) |
+| 2026-11-08 | Hackathon judging readiness: correct judge facts, surface the live demo (documentation) | PR #38 (`79cecec`) |
+| 2026-11-08 | LLM discoverability and the machine-readable site surface | PR #39 (`b6648f2`) |
 
-All 34 pull requests are merged into `master`; there are no open pull requests.
+All 38 pull requests are merged into `master`; one pull request (#37) is open.
 Verified via the GitHub API at documentation time. The latest merge on `master` is
-PR #34 (`fb69db8`, 2026-11-08), which records the PR #33 release.
+PR #39 (`b6648f2`, 2026-11-08), deployed to production.
 
 ## Release history
 
-PACT has **no tagged releases**. The `master` branch is the release. The latest
-**code release** on `master` is PR #33 (`41958ab`, 2026-11-08), deployed to
-production at that commit. The latest merge overall is PR #34 (`fb69db8`), a
-documentation change that records that release. See
+PACT has **no tagged releases**. The `master` branch is the release. The latest merge
+on `master` is PR #39 (`b6648f2`, 2026-11-08), the LLM-discoverability and
+machine-readable site surface, deployed to production at that commit. The latest
+**application code** release on `master` is PR #33 (`41958ab`, 2026-11-08), deployed
+to production at that commit; PRs #35, #36 and #38 were documentation-only and PR #39
+changed the site build and machine-readable surface only. See
 [`CHANGELOG.md`](../../CHANGELOG.md) for the change history.
 
 ## Deployment references
@@ -54,7 +60,7 @@ documentation change that records that release. See
 - **Database:** PostgreSQL (Neon-compatible)
 - **Payments:** PayPal Sandbox
 
-Live health verified on 2026-11-08 (deployed commit `41958ab`):
+Live health verified on 2026-11-08 (deployed commit `b6648f2`):
 
 ```json
 {

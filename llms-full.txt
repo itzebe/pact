@@ -3,7 +3,9 @@
 > Machine-readable-friendly consolidation of PACT's verified documentation. This
 > file exists so an LLM can understand the project end to end without stitching
 > together many files. Where this file and a canonical document disagree, the
-> canonical document wins (see **Precedence** below).
+> canonical document wins (see **Precedence** below). It is served verbatim at
+> <https://pact-flame.vercel.app/llms-full.txt>; its links are GitHub-absolute so
+> they resolve from either location.
 
 PACT — conditional settlement infrastructure for the agent economy.
 Repository: https://github.com/itzebe/pact · Live: https://pact-flame.vercel.app/ ·
