@@ -203,6 +203,15 @@
       "status": "implemented_verified",
       "evidence": ["backend/tests/test_pool_config.py"],
       "note": "Previously a known gap: the settings were defined but never passed to get_pool."
+    },
+    {
+      "id": "money_route_rate_limiting",
+      "name": "Money-route rate limiting",
+      "description": "Per-identity fixed-window ceilings on every money-bearing route (job create, run, approve, cancel, refund, reconcile, admin provider-order read). Identity is the signed token subject, or the client address for a guest/anonymous caller, so a guest cannot reset its budget by minting a fresh session. The counter is shared through PostgreSQL when configured and process-local otherwise; a configured-but-unreachable store refuses. Production refuses to start with the guard disabled.",
+      "implementation": ["backend/pact/core/rate_limit.py", "backend/pact/api/routes.py", "backend/pact/config.py"],
+      "status": "implemented_verified",
+      "evidence": ["backend/tests/test_rate_limit.py", "backend/tests/test_rate_limit_postgres.py", "backend/tests/test_deployment_safety.py"],
+      "note": "Exceeding a limit is 429 with Retry-After and X-RateLimit-* headers; /api/health reports the scope (memory/postgres/unavailable)."
     }
   ],
   "not_implemented": [

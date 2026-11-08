@@ -149,6 +149,17 @@ escrow-relevant event types are acted on; an unknown type is acknowledged and ig
 An unverifiable event is refused (`401`) and changes nothing. Source:
 `backend/pact/core/webhooks.py`, `backend/pact/core/webhook_store.py`.
 
+## What happens if a caller floods the money routes?
+
+Each money-bearing route (job create, run, approve, cancel, refund, reconcile, and
+the provider-order read) enforces a per-identity fixed-window limit. A registered
+account is keyed on its signed subject; a guest or anonymous caller is keyed on its
+client address, so minting a fresh guest session does not reset the budget. Exceeding
+a limit is `429` with a `Retry-After` header. When a database is configured the counter
+is shared through PostgreSQL, so the limit is not spent once per instance; a
+configured-but-unreachable store refuses rather than serving unbounded. Source:
+`backend/pact/core/rate_limit.py`.
+
 ## What technology does PACT use?
 
 Python 3.11 + FastAPI on the backend; React 18 + Vite + Tailwind on the frontend;

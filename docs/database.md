@@ -103,6 +103,25 @@ which can carry payer identity.
 Consumption is one statement (`INSERT … ON CONFLICT … RETURNING`), so a captured
 ticket cannot be replayed against another instance.
 
+### Rate-limit registry (`core/rate_limit.py`)
+
+**`rate_limit_events`** — one row per counted money-route request, so the counter is
+shared across instances when a database is configured.
+
+| Column | Type | Purpose |
+|---|---|---|
+| `id` | `BIGSERIAL PRIMARY KEY` | Surrogate key |
+| `scope` | `TEXT NOT NULL` | The route/operation the limit applies to |
+| `key` | `TEXT NOT NULL` | The hashed identity (subject, or address for a guest) |
+| `at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | Indexed with `(scope, key)` for a range-scan count |
+
+A count is one statement (`SELECT count(*) … WHERE scope = … AND key = … AND at >
+now() - interval`), so a limit is evaluated atomically against the shared rows. Rows
+older than the retention horizon — the largest configured window, floored at one hour
+(`MAX_RETENTION_SECONDS`) — are pruned opportunistically (bounded, `FOR UPDATE SKIP
+LOCKED`). With no database the same interface is served by an in-process counter, and
+a configured-but-unreachable store yields a limiter that refuses every request.
+
 ### Customer accounts (`core/auth_store.py`)
 
 Present but only used when the optional customer-auth subsystem is enabled.
@@ -198,6 +217,11 @@ the identity was minted by the server, not claimed by a person.
   batches (`CLEANUP_BATCH = 500`) with `FOR UPDATE SKIP LOCKED`.
 - **Consumed tickets** (`consumed_tickets`): retained only for the ticket's
   remaining lifetime (60 seconds), pruned by an indexed range scan.
+- **Rate-limit events** (`rate_limit_events`): retained only for the retention
+  horizon — the largest configured window, floored at one hour
+  (`MAX_RETENTION_SECONDS`) — pruned opportunistically in bounded batches (`FOR UPDATE
+  SKIP LOCKED`). The floor can never fall below an operator's longer window, so a prune
+  never deletes rows that are still counting.
 - **Jobs**: retained indefinitely (including tombstoned jobs, so a live PayPal
   authorization is never silently discarded). Deletion is a soft-delete tombstone
   set only once the escrow is terminal.

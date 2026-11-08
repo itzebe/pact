@@ -124,6 +124,17 @@ proposes; the engine decides.
 
 **Fail closed** — the default on uncertainty: refuse rather than assume success.
 
+**Money route** — a route that can create a job, drive its lifecycle, move or reverse
+money, or read the provider's order record. Each is rate limited per identity.
+
+**Fixed-window rate limit** — a ceiling on requests per identity over a fixed time
+window, applied to every money route. Exceeding it is `429`. The counter is shared
+through PostgreSQL when configured, so the limit holds across instances rather than
+being spent once per instance.
+
+**Rate-limit identity** — what a limit is counted against: a registered account's
+signed subject, or, for a guest or anonymous caller, the hashed client address.
+
 ## Related
 
 - Terms in context: [`overview.md`](overview.md), [`payment-lifecycle.md`](payment-lifecycle.md)

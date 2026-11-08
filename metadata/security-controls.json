@@ -173,6 +173,14 @@
       "source": ["backend/pact/config.py"],
       "tests": ["backend/tests/test_security.py", "backend/tests/test_deployment_safety.py"],
       "threats": ["non-durable ledger", "process-local ticket replay"]
+    },
+    {
+      "id": "money_route_rate_limiting",
+      "category": "availability",
+      "control": "Every money-bearing route (job create, run, approve, cancel, refund, reconcile, admin provider-order read) is bounded per identity in a fixed window. A guest is keyed on its hashed client address, not its subject, so minting fresh sessions from one address cannot reset the budget. The counter is shared through PostgreSQL when configured; a configured-but-unreachable store refuses every request rather than serving unbounded. Production refuses to start with the guard disabled (PACT_RATE_LIMIT_ENABLED=false).",
+      "source": ["backend/pact/core/rate_limit.py", "backend/pact/api/routes.py", "backend/pact/config.py", "backend/pact/api/auth.py"],
+      "tests": ["backend/tests/test_rate_limit.py", "backend/tests/test_rate_limit_postgres.py", "backend/tests/test_deployment_safety.py"],
+      "threats": ["unbounded provider calls from one caller", "provider rate-limit exhaustion for all users", "per-address cap evaded by rotating guest sessions"]
     }
   ],
   "reference": "docs/security.md"

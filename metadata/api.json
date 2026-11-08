@@ -12,7 +12,8 @@
   "rate_limits": [
     { "scope": "run", "mechanism": "bounded semaphore PACT_MAX_CONCURRENT_RUNS", "response": "429 with Retry-After: 2" },
     { "scope": "guest_sessions", "mechanism": "new workspaces per client IP per window", "response": "429" },
-    { "scope": "guest_jobs", "mechanism": "per-workspace job quota PACT_GUEST_MAX_JOBS", "response": "429" }
+    { "scope": "guest_jobs", "mechanism": "per-workspace job quota PACT_GUEST_MAX_JOBS", "response": "429" },
+    { "scope": "money_routes", "mechanism": "per-identity fixed window (PACT_RATELIMIT_*) on job create, run, approve, cancel, refund, reconcile and the admin provider-order read; shared through PostgreSQL when configured, process-local otherwise, refusing when a configured store is unreachable", "routes": ["POST /api/jobs", "POST /api/jobs/{job_id}/run", "POST /api/jobs/{job_id}/approve", "POST /api/jobs/{job_id}/cancel", "POST /api/jobs/{job_id}/refund", "POST /api/jobs/{job_id}/reconcile", "GET /api/jobs/{job_id}/paypal-order"], "response": "429 with Retry-After and X-RateLimit-* headers", "source": "backend/pact/core/rate_limit.py" }
   ],
   "endpoints": [
     { "method": "GET", "path": "/api/health", "role": "public", "purpose": "Configuration and settlement mode", "source": "backend/pact/api/routes.py" },

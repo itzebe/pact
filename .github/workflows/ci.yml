@@ -147,6 +147,7 @@ jobs:
             tests/test_webhook_postgres.py tests/test_webhook_persistence.py \
             tests/test_pool.py tests/test_auth_store.py tests/test_accounts.py \
             tests/test_email_dispatcher.py tests/test_settlement_pooling.py \
+            tests/test_rate_limit_postgres.py \
             -q --no-header -rs > pg-tests.log 2>&1 || { cat pg-tests.log; exit 1; }
           cat pg-tests.log
           if grep -Eq "[0-9]+ skipped" pg-tests.log; then

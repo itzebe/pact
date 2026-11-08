@@ -45,6 +45,14 @@ Errors are `{"detail": <string | object>}`. Common codes:
 
 ## Rate limiting
 
+- **Money routes:** each money-bearing route is bounded per identity in a fixed
+  window. Exceeding it returns `429` with `Retry-After` and `X-RateLimit-Limit` /
+  `X-RateLimit-Remaining` / `X-RateLimit-Scope` headers. A registered account is
+  keyed on its signed subject; a guest is keyed on its client address (so minting a
+  fresh session does not reset the budget). The counter is shared through PostgreSQL
+  when configured; `X-RateLimit-Scope` (and `rate_limit.scope` in `/api/health`)
+  reports `postgres`, `memory`, or `unavailable`. Limits are set by `PACT_RATELIMIT_*`
+  variables.
 - **Run concurrency:** bounded by `PACT_MAX_CONCURRENT_RUNS`; beyond it, `run`
   returns `429` with `Retry-After: 2`.
 - **Guest sessions:** new workspaces are capped per client IP within a window
@@ -79,7 +87,8 @@ Public. Configuration and settlement mode. Exposes no secret.
   "auth": { "configured": true },
   "currency": "USD",
   "sellers": ["seller_atlas", "seller_nova", "seller_quill"],
-  "storage": { "backend": "postgres", "durable": true }
+  "storage": { "backend": "postgres", "durable": true },
+  "rate_limit": { "enabled": true, "scope": "postgres", "shared": true }
 }
 ```
 
@@ -195,7 +204,8 @@ Post a job. The buyer identity comes from the token, never the body.
 | `budget_max` | > 0 and <= 1,000,000 |
 | `seller_ids` | up to 10, must be known sellers |
 
-**Response 201:** the full job object (see below).
+**Response 201:** the full job object (see below). `429` when the caller's job-creation
+budget is spent (see [Rate limiting](#rate-limiting)).
 
 ### `GET /api/jobs` — any
 
@@ -216,6 +226,7 @@ Run the full lifecycle (negotiate → hold → deliver → verify → settle). Q
 |---|---|
 | Job already running | `409` |
 | Too many runs in flight | `429` (`Retry-After: 2`) |
+| Caller's run budget spent | `429` (`Retry-After`) |
 | Run exceeded its deadline | `504` |
 | Unknown seller requested | `400` |
 
@@ -224,13 +235,14 @@ Run the full lifecycle (negotiate → hold → deliver → verify → settle). Q
 ### `POST /api/jobs/{job_id}/approve` — owner buyer
 
 Continue after the buyer approved the PayPal order. `409` if the job is not
-`awaiting_approval` or the approval claim was lost.
+`awaiting_approval` or the approval claim was lost. `429` when the caller's budget
+is spent (see [Rate limiting](#rate-limiting)).
 
 ### `POST /api/jobs/{job_id}/cancel` — owner buyer
 
 Void any outstanding hold so the job can be deleted. `409` if the money has already
 moved or the outcome is unknown; `502` if PayPal could not be reached (the job is
-left unresolved).
+left unresolved). `429` when the caller's budget is spent.
 
 ### `POST /api/jobs/{job_id}/refund` — owner buyer
 
@@ -238,11 +250,13 @@ Refund a captured payment, in full or in part.
 
 **Request (optional body):** `{"amount": 25.0, "reason": "…"}` (default: full refund).
 **Response:** the full job object. `409` for an over-large amount or a wrong state;
-`502` for a provider error or an ambiguous outcome.
+`502` for a provider error or an ambiguous outcome; `429` when the caller's budget is
+spent.
 
 ### `POST /api/jobs/{job_id}/reconcile` — admin
 
-Resolve an `unresolved` job by reading PayPal. `409` if the job is not unresolved.
+Resolve an `unresolved` job by reading PayPal. `409` if the job is not unresolved;
+`429` when the caller's budget is spent.
 
 ### `DELETE /api/jobs/{job_id}` — admin
 
@@ -272,7 +286,7 @@ the endpoint above) or a bearer header. Events: `ledger` (an entry) and `done`
 ### `GET /api/jobs/{job_id}/paypal-order` — admin
 
 The provider's own order record, with identity redacted. `409` if the job has no
-order or the deployment is simulated.
+order or the deployment is simulated; `429` when the caller's budget is spent.
 
 ---
 

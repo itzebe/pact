@@ -62,6 +62,8 @@ Each is implemented and covered by tests in this repository (see
   connection) with a filesystem fallback for single-instance use.
 - Fail-closed security: missing auth secret refuses requests; production refuses a
   live PayPal host, a mock settlement, or a missing database.
+- Per-identity rate limiting on every money-bearing route, with a shared counter
+  (PostgreSQL) so the limit is not spent once per instance.
 
 ## Important limitations
 

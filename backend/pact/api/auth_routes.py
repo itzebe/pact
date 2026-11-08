@@ -26,11 +26,11 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..core.accounts import AuthError, accounts
-from ..core.auth_store import hash_identifier
 from .auth import (
     GUEST_COOKIE,
     GUEST_COOKIE_PATH,
     Principal,
+    client_ip_hash as _client_ip_hash,
     require_principal,
 )
 
@@ -44,27 +44,6 @@ router = APIRouter(prefix="/api/auth", dependencies=[Depends(require_principal)]
 #: cannot leak to a sibling subdomain.
 REFRESH_COOKIE = "pact_refresh"
 REFRESH_COOKIE_PATH = "/api/auth"
-
-
-def _client_ip_hash(request: Request) -> str:
-    """Hash of the client address, for rate limiting only.
-
-    The *rightmost* ``x-forwarded-for`` entry is used: it is the one written by the
-    nearest trusted proxy (Vercel's edge, which documents that it overwrites this
-    header rather than appending to it). The leftmost entry is client-controllable
-    and would let a caller evade the per-address cap by forging a new value on every
-    request. Falling back to the socket peer keeps this correct when there is no
-    proxy in front. The value is hashed, never stored raw.
-    """
-    forwarded = request.headers.get("x-forwarded-for", "")
-    candidate = ""
-    if forwarded:
-        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-        if parts:
-            candidate = parts[-1]
-    if not candidate:
-        candidate = request.client.host if request.client else "unknown"
-    return hash_identifier(candidate)
 
 
 def _now():

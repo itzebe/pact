@@ -100,6 +100,8 @@ list.
 | `PACT_REQUIRE_REAL_PAYPAL` | `true` makes missing credentials a hard startup failure |
 | `PACT_PAYPAL_SANDBOX_ONLY` | `true` hard-refuses a live PayPal host in every environment |
 | `PACT_MAX_CONCURRENT_RUNS` | Concurrent-run ceiling per instance |
+| `PACT_RATE_LIMIT_ENABLED` | Master switch for money-route rate limiting; **production refuses to start with this `false`** |
+| `PACT_RATELIMIT_*_LIMIT` / `_WINDOW_SECONDS` | Per-route fixed-window ceilings (run, approve, cancel, reconcile, refund, job-create, read); a zero or negative value is refused |
 | `PACT_RUN_TIMEOUT_SECONDS` / `PACT_LEASE_SECONDS` | Run deadline and execution lease |
 | `PACT_PG_POOL_MAX_SIZE` | Per-instance pool size (default 5) |
 | `PACT_PG_POOL_MIN_SIZE` | Connections kept open per instance (default 0) |
