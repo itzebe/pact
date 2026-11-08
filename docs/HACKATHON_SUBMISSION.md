@@ -1,7 +1,8 @@
 # Hackathon submission — PACT
 
 Submission copy for the **PayPal AI Hackathon**
-(<https://paypalaihackathon.devpost.com/>, deadline **Nov 12, 2026 2:00 pm PT**).
+(<https://paypalaihackathon.devpost.com/>, submission period closes **Thu Nov 12, 2026
+12:00 pm Pacific** — per the [official rules](https://paypalaihackathon.devpost.com/rules)).
 Field-by-field, ready to paste. Every claim here is backed by the implementation or by
 [`judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md`](judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md).
 
@@ -149,7 +150,7 @@ matters more than making the happy path look smooth.
 | Architecture | [`TOPOLOGY.md`](TOPOLOGY.md) |
 | Demo video (final narrated, 2:17) | [`judge-demo/pact-demo-final-narrated.mp4`](judge-demo/pact-demo-final-narrated.mp4) |
 | Demo video (silent walkthrough) | [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4) |
-| Demo video (YouTube link) | ⏳ **Owner action** — upload the final cut to YouTube (public) and paste the link here |
+| Demo video (YouTube, public) | <https://www.youtube.com/watch?v=CMGsmqTr6FQ> — "PACT — Agreements You Can Verify \| PayPal AI Hackathon 2026" (2:17) |
 | Judge entry point | [`FINAL_JUDGE_PACKAGE.md`](FINAL_JUDGE_PACKAGE.md) |
 | Judging strategy | [`JUDGING_STRATEGY.md`](JUDGING_STRATEGY.md) |
 

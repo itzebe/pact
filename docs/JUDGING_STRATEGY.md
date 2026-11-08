@@ -7,13 +7,13 @@ PACT claim is tied to a concrete implementation or piece of evidence.
 > **Note on demo timestamps.** The timestamps in the mapping table refer to the planned
 > structure of the final demo video (see
 > [`judge-demo/FINAL_VIDEO_SCRIPT.md`](judge-demo/FINAL_VIDEO_SCRIPT.md)). They describe
-> where in the video the evidence will appear. They are not a claim that this particular
-> cut already exists — an earlier **narrated** 2:52 demo exists at
-> [`demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4), and a **silent** 58 s walkthrough
-> of the current product exists at
-> [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4). The
-> final narrated cut is an owner action; see
-> [`judge-demo/FINAL_VIDEO_CHECKLIST.md`](judge-demo/FINAL_VIDEO_CHECKLIST.md).
+> where in the video the evidence appears. The final narrated cut is recorded and public on
+> YouTube: <https://www.youtube.com/watch?v=CMGsmqTr6FQ> (2:17). The repository also carries
+> the same cut as [`judge-demo/pact-demo-final-narrated.mp4`](judge-demo/pact-demo-final-narrated.mp4),
+> a **silent** 0:58 walkthrough at
+> [`judge-demo/pact-walkthrough-silent.mp4`](judge-demo/pact-walkthrough-silent.mp4), and an
+> earlier narrated demo at [`demo/pact-demo-final.mp4`](demo/pact-demo-final.mp4) (2:52).
+> See [`judge-demo/FINAL_VIDEO_CHECKLIST.md`](judge-demo/FINAL_VIDEO_CHECKLIST.md).
 
 ---
 
@@ -26,9 +26,9 @@ PACT claim is tied to a concrete implementation or piece of evidence.
 | Official rules | <https://paypalaihackathon.devpost.com/rules> |
 | Sponsor / Administrator | PayPal Inc. / Devpost |
 | Format | Global, online, public |
-| Submission period | Thu **Oct 1, 2026 9:00 am PT** → Thu **Nov 12, 2026 2:00 pm PT** |
-| Judging period | Fri Nov 13, 2026 2:00 pm PT → Tue Dec 15, 2026 8:00 am PT |
-| Winners announced | On or around Mon Dec 21, 2026 |
+| Submission period | Thu **Oct 1, 2026 9:15 am PT** → Thu **Nov 12, 2026 12:00 pm PT** |
+| Judging period | Tue **Dec 1, 2026 2:00 pm PT** → Tue **Dec 15, 2026 8:00 am PT** |
+| Winners announced | On or around Mon **Dec 21, 2026** |
 | Tracks | **None** — "There are no prescribed problem statements and no set of tracks." |
 | Core requirement | "your project must meaningfully use both PayPal and AI" |
 | Prize pool | $67,500 in cash, plus credits/subscriptions |
@@ -44,7 +44,7 @@ PACT claim is tied to a concrete implementation or piece of evidence.
 | Text description of features and functionality | ✅ [`HACKATHON_SUBMISSION.md`](HACKATHON_SUBMISSION.md) |
 | Public GitHub repo, all source + assets | ✅ <https://github.com/itzebe/pact> |
 | Open source license visible at top of repo | ✅ MIT (`LICENSE`) |
-| Demo video < 3 min, public on YouTube | ⏳ Script/storyboard/transcript ready; **recording + upload is an owner action** |
+| Demo video < 3 min, public on YouTube | ✅ <https://www.youtube.com/watch?v=CMGsmqTr6FQ> — 2:17, public |
 | Tools list (which tools, how used) | ✅ In the submission copy |
 
 ---
@@ -86,7 +86,20 @@ Mention prizes, and it is a strong fit for two in particular:
 | **Design** | Complete, coherent product, not a PoC | One continuous product: guest onboarding → composer → negotiation → payment panel → verification → AG Grid ledger; responsive to 390 px; WCAG-minded contrast and focus | [`judge-demo/screenshots/`](judge-demo/screenshots), live product | 0:10–0:25, 1:10–1:30 | Show mobile briefly so "complete product" is visible |
 | **Potential Impact** | Credible case for a real problem and audience | The problem is stated concretely: two strangers, two fears, and the friction of a new account per transaction; the demo shows the workflow actually completing | Problem statement + live journey; [`PRESERVED_VERIFICATION_EVIDENCE.md`](judge-demo/PRESERVED_VERIFICATION_EVIDENCE.md) | 0:00–0:10, 1:45–2:00 | Name the audience explicitly in narration (agent-to-agent work, freelancer/agent marketplaces) |
 | **Innovation/Idea** | Creative, differs from existing concepts | Escrow *conditional on an independent verification verdict*, with the buyer-approval step surfaced honestly; reputation feeds seller selection so the market self-corrects; guest-first, account-less onboarding | README thesis; `backend/pact/core/settlement.py` (verdict-gated capture), seller selection by price/trust | 1:10–1:30 | Avoid "unique in the world" phrasing; state the *combination* |
-| **Presentation** | Clear end-to-end video; problem, who it's for, why it matters | The demo script follows the real product states, and the evidence documents separate fresh checks from historical ones | [`judge-demo/FINAL_VIDEO_SCRIPT.md`](judge-demo/FINAL_VIDEO_SCRIPT.md), [`judge-demo/FINAL_VIDEO_TRANSCRIPT.md`](judge-demo/FINAL_VIDEO_TRANSCRIPT.md) | whole video | The video must actually be recorded and uploaded |
+| **Presentation** | Clear end-to-end video; problem, who it's for, why it matters | The demo script follows the real product states, and the evidence documents separate fresh checks from historical ones | [`judge-demo/FINAL_VIDEO_SCRIPT.md`](judge-demo/FINAL_VIDEO_SCRIPT.md), [`judge-demo/FINAL_VIDEO_TRANSCRIPT.md`](judge-demo/FINAL_VIDEO_TRANSCRIPT.md) | whole video | The video is recorded and public (2:17); keep it under three minutes |
+
+### 3.1 Criterion audit — smallest change that raises the score
+
+Each row is the smallest improvement that would materially raise the score for that
+criterion. Anything already done is marked **done**.
+
+| Criterion | Where PACT stands | Actual weakness | Smallest score-raising improvement |
+| --- | --- | --- | --- |
+| **Technological Implementation** | Real PayPal Orders v2 `intent=AUTHORIZE` → approve → authorize → capture/void + refunds, idempotent; three LLM roles; hash-chained ledger; single-capture under a real DB lock | The strongest proof — a real Sandbox approval and capture id on screen — is only convincing if the judge watches the video | **Done:** the 2:17 video shows the Sandbox approval, the captured settlement, the ledger, and the refund. Keep the evidence pack linked so a judge can click straight to the provider ids. |
+| **Design** | One continuous product: guest onboarding → composer → negotiation → payment panel → verification → AG Grid ledger; responsive to 390 px | A judge on desktop may never see the mobile layout | **Done:** screenshots `09`/`10` capture the 390 px layout; the walkthrough names the product states. No further UI change is warranted. |
+| **Potential Impact** | Concrete problem (two fears), real workflow that completes, reputation that routes around unreliable sellers | The audience is not named in one place a judge will read | **Done:** the submission copy names agent-to-agent work and small agent/freelancer markets. Do not add impact numbers that are not measured. |
+| **Innovation/Idea** | Settlement gated on an independent verdict, buyer-approval surfaced honestly, reputation feeds selection, account-less onboarding | Risk of overclaiming ("first"/"only") | **Done:** the copy states the *combination* and never claims to be first. |
+| **Presentation** | A recorded, public 2:17 demo; problem → who → why → pass/fail → why it matters; evidence separated fresh vs historical | The public Devpost page has a few stale facts (see below) | **Owner action:** apply [`devpost-submission-copy.md`](devpost-submission-copy.md) to the Devpost page — it fixes the backend stack ("Node.js" → FastAPI), adds the public video URL, and corrects the reputation status. |
 
 ---
 
@@ -115,8 +128,9 @@ Mention prizes, and it is a strong fit for two in particular:
   fail verification and end `voided`. The video should show a captured run; the script
   notes this.
 - **No dispute/arbitration flow yet.** A disagreement beyond the verdict has no path.
-- **The demo video does not exist yet.** Script, storyboard, transcript and checklist are
-  complete; recording and YouTube upload are owner actions.
+- **The demo video is recorded and public on YouTube** (2:17, under the three-minute limit);
+  see §1. If a re-record is ever needed, the script/storyboard/transcript/checklist are
+  complete and the recording pipeline is committed under `judge-demo/tools/`.
 - **Partial-release is not implemented** (full release or void only).
 
 ## 6. Recommended emphasis for the final submission

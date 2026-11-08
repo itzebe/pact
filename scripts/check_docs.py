@@ -53,6 +53,7 @@ REQUIRED_DOCS = [
     "docs/faq.md",
     "docs/glossary.md",
     "docs/implementation-status.md",
+    "docs/devpost-submission-copy.md",
     "docs/evidence/README.md",
     "docs/architecture-decisions/README.md",
 ]

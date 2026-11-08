@@ -31,6 +31,15 @@ If you are new to PACT, read in this order: [`overview.md`](overview.md) →
 | [`AUTH.md`](AUTH.md) | Authentication and authorization in depth. |
 | [`TOPOLOGY.md`](TOPOLOGY.md) | Multi-instance safety analysis. |
 
+## Judging (PayPal AI Hackathon)
+
+| Document | What it covers |
+|---|---|
+| [`FINAL_JUDGE_PACKAGE.md`](FINAL_JUDGE_PACKAGE.md) | Single entry point for a judge or automated evaluator. |
+| [`JUDGING_STRATEGY.md`](JUDGING_STRATEGY.md) | Rubric mapping, criterion audit, competitive positioning. |
+| [`HACKATHON_SUBMISSION.md`](HACKATHON_SUBMISSION.md) | The submission copy, field by field. |
+| [`devpost-submission-copy.md`](devpost-submission-copy.md) | The Devpost-form revision (owner applies it on Devpost). |
+
 ## Operations
 
 | Document | What it covers |

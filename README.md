@@ -1,23 +1,20 @@
 # PACT
 
-**Live demo:** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video:** [`docs/judge-demo/pact-demo-final-narrated.mp4`](docs/judge-demo/pact-demo-final-narrated.mp4) (2:17, narrated, PayPal Sandbox, shows the guest flow through refund)
+**Live demo (no account):** <https://pact-flame.vercel.app/> · **Source:** <https://github.com/itzebe/pact> · **Demo video (2:17):** <https://www.youtube.com/watch?v=CMGsmqTr6FQ>
 
-The demo video above is the final narrated walkthrough — guest workspace, job and
-negotiation, a real PayPal **Sandbox** approval, captured settlement, the hash-chained
-ledger, and a refund. An earlier narrated cut with separate evidence segments (a genuine
-PayPal Sandbox receipt and two application captures) is at
-[`docs/demo/pact-demo-final.mp4`](docs/demo/pact-demo-final.mp4) (2:52); see
-[`docs/DEMO_EVIDENCE.md`](docs/DEMO_EVIDENCE.md) for what each capture does and does not
-establish. The longer pre-compression cut is
-[`docs/demo/pact-demo-enhanced.mp4`](docs/demo/pact-demo-enhanced.mp4) (3:06); the
-pre-evidence cut remains at [`docs/demo/pact-demo.mp4`](docs/demo/pact-demo.mp4).
+**Settlement infrastructure for the agent economy, built on PayPal escrow.** AI agents
+can already negotiate and produce work. What they cannot do is *safely pay each other*,
+because there is no neutral party holding the money until the work is proven. PACT is that
+layer: agents negotiate a price, PayPal holds the buyer's funds, an independent verifier
+checks the delivery against the agreed acceptance criteria, and only then does the money
+move.
 
-**Judging a hackathon?** Start at [`docs/FINAL_JUDGE_PACKAGE.md`](docs/FINAL_JUDGE_PACKAGE.md)
-— a single entry point linking the walkthrough, the preserved evidence, the screenshots,
-and the submission copy. To use the product itself, open the live URL above: a guest
-workspace is provisioned automatically, with no account to create.
+If verification fails, the hold is voided and the buyer is charged nothing.
 
-**Settlement infrastructure for the agent economy, built on PayPal escrow.**
+**Judging the PayPal AI Hackathon?** Start at [`docs/FINAL_JUDGE_PACKAGE.md`](docs/FINAL_JUDGE_PACKAGE.md)
+— one entry point linking the 2:17 demo, the preserved evidence, the screenshots, and the
+submission copy. Or open the live URL: a guest workspace is provisioned automatically, with
+no account to create.
 
 > **Documentation map.** This README is the public introduction. The canonical
 > technical documentation is in [`docs/`](docs/README.md), navigable from
@@ -28,13 +25,12 @@ workspace is provisioned automatically, with no account to create.
 >
 > - [Overview](docs/overview.md) · [Architecture](docs/architecture.md) · [Payment lifecycle](docs/payment-lifecycle.md)
 > - [Database](docs/database.md) · [Security](docs/security.md) · [AI system](docs/ai-system.md)
-> - [API reference](docs/api/README.md) · [Deployment](docs/deployment.md) · [Beta operations](docs/beta-operations.md) · [Beta launch checklist](docs/beta-launch-checklist.md) · [Development](docs/development.md)
+> - [API reference](docs/api/README.md) · [Deployment](docs/deployment.md) · [Development](docs/development.md)
 > - [FAQ](docs/faq.md) · [Glossary](docs/glossary.md) · [Implementation status](docs/implementation-status.md)
 > - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md)
+> - Operations for a private beta (not needed to judge PACT): [beta operations](docs/beta-operations.md) · [beta launch checklist](docs/beta-launch-checklist.md)
 
-AI agents can already negotiate and produce work. What they cannot do is *safely pay each other*, because there is no neutral party holding the money until the work is proven. PACT is that layer: agents negotiate a price, PayPal holds the buyer's funds in escrow, an independent verifier checks the delivery, and only then does the money move.
-
-If verification fails, the hold is voided and the buyer is charged nothing.
+The lifecycle in one line:
 
 ```
 brief ─▶ negotiate ─▶ agree ─▶ HOLD (PayPal authorize) ─▶ deliver ─▶ verify ─┬─▶ pass  ─▶ CAPTURE (release)
