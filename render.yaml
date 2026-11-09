@@ -1,16 +1,24 @@
-# One service serves both the API and the built UI, so the hosted demo is a
-# single URL that a judge can open and use immediately.
+# One free-tier service serves both the API and the built UI, so the hosted demo
+# is a single URL a judge can open and use immediately.
+#
+# Free-tier shape, deliberately:
+#   - plan: free            Render's zero-cost web service (spins down after 15
+#                           minutes idle, ~1 min cold start; 750 instance-hours/month).
+#   - no persistent disk    Free services have an ephemeral filesystem and cannot
+#                           attach a disk, so all durable state lives in DATABASE_URL.
+#                           Render's free Postgres expires after 30 days; point this
+#                           at an external free Postgres (e.g. Neon) for a longer-lived demo.
+#   - DATABASE_URL          REQUIRED here: without it a non-development deploy falls back to
+#                           process-local, non-durable state, which is wrong for a hosted service.
+#   - PACT_ENV=development  what permits the no-credentials mock PayPal path the demo uses.
+#                           It refuses to start as "production" without real PayPal credentials.
 services:
   - type: web
     name: pact
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     healthCheckPath: /api/health
-    disk:
-      name: pact-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: PACT_ENV
         value: development
@@ -23,6 +31,10 @@ services:
           type: web
           name: pact
           property: host
+      # Required on a platform with no durable disk: the job ledger, reputation and
+      # single-use ticket registry must live in an external Postgres.
+      - key: DATABASE_URL
+        sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
@@ -32,11 +44,11 @@ services:
       - key: LLM_API_KEY
         sync: false
       - key: LLM_BASE_URL
-        value: https://api.openai.com/v1
+        value: https://api.groq.com/openai/v1
       - key: LLM_MODEL
-        value: gpt-4o-mini
+        value: openai/gpt-oss-20b
       - key: PACT_DATA_DIR
-        value: /data
+        value: /tmp/pact-data
       - key: PACT_CURRENCY
         value: USD
       # The demo runs without PayPal credentials by default so a visitor can still
